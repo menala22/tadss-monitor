@@ -1,0 +1,21 @@
+[server]
+port = 8503
+address = "localhost"
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#FF6B6B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"
+
+# Sidebar theme (fixes warnings)
+[theme.sidebar]
+backgroundColor = "#F8F9FA"
+textColor = "#262730"

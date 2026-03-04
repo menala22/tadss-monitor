@@ -1,0 +1,225 @@
+# =============================================================================
+# TA-DSS: Trading Order Monitoring System
+# Docker Compose for Oracle Cloud Free Tier (ARM64)
+# =============================================================================
+# Optimized for Oracle Ampere A1 (ARM64) instances
+# Resource Limits: 8GB RAM, 2 CPUs (stay within free tier limits)
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Main Application: FastAPI + Scheduler
+  # ===========================================================================
+  tadss-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    platform: linux/arm64
+    container_name: tadss-api
+    
+    # Restart policy for 24/7 operation
+    restart: unless-stopped
+    
+    # Resource limits for Oracle Cloud Free Tier
+    # Max free tier: 4 OCPUs, 24 GB RAM - we use 2 CPUs, 8GB RAM
+    mem_limit: 8g
+    cpus: 2
+    
+    # Port mapping
+    ports:
+      - "8000:8000"  # FastAPI server
+      # - "8503:8503"  # Streamlit dashboard (uncomment if needed)
+    
+    # Environment variables
+    environment:
+      # Application settings
+      - APP_ENV=production
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      
+      # Database configuration
+      - DATABASE_URL=sqlite:///./data/positions.db
+      
+      # Scheduler settings - UTC for consistent timing
+      - MONITOR_INTERVAL=14400  # 4 hours in seconds
+      - TZ=UTC
+      
+      # Keep-alive for Oracle Cloud idle prevention (enabled by default)
+      - ENABLE_KEEPALIVE=true
+      - KEEPALIVE_INTERVAL=1800  # 30 minutes
+      
+      # Telegram (override with .env file or actual values)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-true}
+      
+      # Security
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - CORS_ORIGINS=http://localhost:8000,http://localhost:8503
+    
+    # Volumes for persistence - mount to host for data retention
+    volumes:
+      # Database persistence - SQLite data survives container restarts
+      - ./data:/opt/app/data
+      # Logs persistence - retain logs on host
+      - ./logs:/opt/app/logs
+      # Environment file (create .env in project root)
+      - ../.env:/opt/app/.env:ro
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Logging configuration - stdout for docker logs visibility
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Network mode
+    networks:
+      - tadss-network
+    
+    # Standard output for logs
+    stdin_open: true
+    tty: true
+
+  # ===========================================================================
+  # Keep-Alive Service: Idle Prevention for Oracle Cloud
+  # ===========================================================================
+  # Lightweight service that prevents Oracle from reclaiming idle instances
+  # Runs health checks every 30 minutes to keep instance active
+  # ===========================================================================
+  tadss-keepalive:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    platform: linux/arm64
+    container_name: tadss-keepalive
+    
+    # Restart policy for 24/7 operation
+    restart: unless-stopped
+    
+    # Minimal resource allocation for keep-alive
+    mem_limit: 256m
+    cpus: 0.5
+    
+    # Environment variables
+    environment:
+      # Keep-alive configuration
+      - ENABLE_KEEPALIVE=true
+      - KEEPALIVE_INTERVAL=1800  # 30 minutes
+      - HEALTH_URL=http://tadss-api:8000/health
+      - KEEPALIVE_LOG_FILE=/opt/app/logs/keepalive.log
+      - TZ=UTC
+    
+    # Volumes for log persistence
+    volumes:
+      - ./logs:/opt/app/logs
+    
+    # Depends on API service
+    depends_on:
+      tadss-api:
+        condition: service_healthy
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    
+    # Network mode
+    networks:
+      - tadss-network
+    
+    # Command: run keep-alive script only
+    command: ["/usr/local/bin/keepalive.sh"]
+
+  # ===========================================================================
+  # Optional: Streamlit Dashboard
+  # ===========================================================================
+  # Uncomment to enable the Streamlit dashboard
+  # Note: Requires additional resources (1 CPU, 2GB RAM recommended)
+  # ===========================================================================
+  # tadss-dashboard:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile
+  #   platform: linux/arm64
+  #   container_name: tadss-dashboard
+  #   
+  #   restart: unless-stopped
+  #   
+  #   # Resource limits
+  #   mem_limit: 2g
+  #   cpus: 1
+  #   
+  #   # Port mapping
+  #   ports:
+  #     - "8503:8503"
+  #   
+  #   # Environment variables
+  #   environment:
+  #     - APP_ENV=production
+  #     - HOST=0.0.0.0
+  #     - PORT=8503
+  #     - DATABASE_URL=sqlite:///./data/positions.db
+  #     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+  #     - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+  #     - TZ=UTC
+  #   
+  #   # Volumes
+  #   volumes:
+  #     - ./data:/opt/app/data
+  #     - ./logs:/opt/app/logs
+  #     - ../.env:/opt/app/.env:ro
+  #   
+  #   # Depends on API service
+  #   depends_on:
+  #     tadss-api:
+  #       condition: service_healthy
+  #   
+  #   # Command to run Streamlit
+  #   command: ["streamlit", "run", "src/ui.py", "--server.port", "8503", "--server.address", "0.0.0.0"]
+  #   
+  #   # Logging
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+  #   
+  #   networks:
+  #     - tadss-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+# Using local host directories for data persistence
+# Volumes are created automatically in ./data and ./logs directories
+# =============================================================================
+volumes:
+  # Named volumes (optional - uncomment if you prefer named volumes)
+  # tadss-data:
+  #   driver: local
+  #   name: tadss-data
+  # tadss-logs:
+  #   driver: local
+  #   name: tadss-logs
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  tadss-network:
+    driver: bridge
+    name: tadss-network
