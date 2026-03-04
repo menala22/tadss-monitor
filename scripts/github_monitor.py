@@ -68,6 +68,42 @@ def main() -> int:
         logger.info("🔍 Starting position check...")
         results = monitor.check_all_positions()
 
+        # Send status summary to Telegram
+        try:
+            from src.notifier import TelegramNotifier
+            alerter = TelegramNotifier()
+            if alerter.enabled:
+                total = results.get('total', 0)
+                alerts_sent = results.get('alerts_sent', 0)
+                errors = results.get('errors', 0)
+                
+                if alerts_sent > 0:
+                    status_emoji = "📊"
+                    status_text = f"{alerts_sent} alert(s) sent"
+                elif errors > 0:
+                    status_emoji = "⚠️"
+                    status_text = f"{errors} error(s) occurred"
+                else:
+                    status_emoji = "✅"
+                    status_text = "No changes detected"
+                
+                message = f"""
+{status_emoji} <b>GitHub Actions Monitor</b> {status_emoji}
+
+📊 Positions Checked: {total}
+🔔 Alerts Sent: {alerts_sent}
+❌ Errors: {errors}
+
+ℹ️ Status: {status_text}
+
+⏰ {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+                """.strip()
+                
+                alerter.send_custom_message(message)
+                logger.info("📱 Status summary sent to Telegram")
+        except Exception as e:
+            logger.warning(f"Failed to send status summary: {e}")
+
         # Log summary
         logger.info("=" * 60)
         logger.info("📊 SCAN SUMMARY")
