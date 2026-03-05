@@ -241,6 +241,5 @@ def test_telegram_config() -> bool:
         return False
 
     success = telegram.send_test_message()
-    telegram.close()
 
     return success
