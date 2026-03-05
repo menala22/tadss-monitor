@@ -278,6 +278,107 @@ settings = Settings()
 
 ---
 
+### 7.5 Development Workflow & Best Practices
+
+**Local vs Production Code Management:**
+
+**Environment Separation:**
+```bash
+# Local Development (.env.local - NEVER commit)
+TELEGRAM_BOT_TOKEN=test_bot_token
+DATABASE_URL=sqlite:///./data/positions-local.db
+PORT=8001
+APP_ENV=development
+
+# Production (.env on VM - NEVER commit)
+TELEGRAM_BOT_TOKEN=production_bot_token
+DATABASE_URL=sqlite:///./data/positions.db
+PORT=8000
+APP_ENV=production
+```
+
+**Git Branch Strategy:**
+```
+main (production) ← Always deployable
+  ↑
+  └── feature/your-feature (local development)
+```
+
+**Daily Workflow:**
+```bash
+# 1. Start fresh
+git checkout main
+git pull origin main
+git checkout -b feature/my-feature
+
+# 2. Develop locally (port 8001)
+uvicorn src.main:app --reload --port 8001
+
+# 3. Test locally
+pytest tests/ -v
+curl http://localhost:8001/health
+
+# 4. Commit (don't deploy yet)
+git add .
+git commit -m "feat: my feature"
+git push origin feature/my-feature
+
+# 5. When ready, merge and deploy
+git checkout main
+git merge feature/my-feature
+git push origin main
+./scripts/deploy-to-production.sh
+```
+
+**Pre-Deployment Checklist:**
+```bash
+# Run before EVERY deployment
+./scripts/pre-deploy-check.sh
+# Checks:
+# - No uncommitted changes
+# - On main branch
+# - Tests pass
+# - .env not in git
+```
+
+**Deployment Automation:**
+```bash
+# Automated deployment script
+./scripts/deploy-to-production.sh
+# Does:
+# - Pre-deployment checks
+# - Git pull on VM
+# - Database backup
+# - Docker rebuild
+# - Container restart
+# - Health check
+# - Post-deployment verification
+```
+
+**Database Management:**
+```bash
+# Backup before changes
+./scripts/backup-database.sh
+
+# Run migrations
+python src/migrations/migration_YYYYMMDD_feature.py
+
+# Rollback if needed
+./scripts/rollback.sh
+```
+
+**Prevent Discrepancies - Golden Rules:**
+- ✅ Never develop on `main` branch
+- ✅ Never commit `.env` files
+- ✅ Never deploy untested code
+- ✅ Always backup before deployment
+- ✅ Always health check after deployment
+- ✅ Use separate environments (local ≠ production)
+- ✅ Tag production deployments
+- ✅ Document everything
+
+---
+
 ### 8. Monitoring & Logging
 
 **What I Set Up:**
@@ -394,17 +495,23 @@ See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
    - "Set up CI/CD with GitHub Actions"
    - "Create Docker configuration"
 
-3. **Code Review & Optimization**
+3. **Development Workflow**
+   - "How to manage local vs production code?"
+   - "What's the best git branch strategy?"
+   - "How to set up automated deployments?"
+   - "How to prevent local/prod discrepancies?"
+
+4. **Code Review & Optimization**
    - "Review my FastAPI endpoints"
    - "Optimize database queries"
    - "Improve error handling"
 
-4. **Troubleshooting**
+5. **Troubleshooting**
    - "API returns 500 error"
    - "Database connection issues"
    - "Deployment failing"
 
-5. **Best Practices**
+6. **Best Practices**
    - "How to structure a Python project?"
    - "What's the best way to handle secrets?"
    - "How to write tests for FastAPI?"
