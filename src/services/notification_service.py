@@ -8,7 +8,7 @@ position health alerts to users.
 import logging
 from typing import Optional
 
-from telegram import Bot
+import requests
 from telegram.error import TelegramError
 
 from src.config import settings
@@ -29,6 +29,7 @@ class TelegramService:
         bot_token: Telegram bot token from settings.
         chat_id: Target chat ID from settings.
         enabled: Whether Telegram is configured and enabled.
+        api_url: Telegram Bot API endpoint.
     """
 
     def __init__(
@@ -46,8 +47,7 @@ class TelegramService:
         self.bot_token = bot_token or settings.telegram_bot_token
         self.chat_id = chat_id or settings.telegram_chat_id
         self.enabled = bool(self.bot_token and self.chat_id)
-
-        self._bot: Optional[Bot] = None
+        self.api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
 
         if self.enabled:
             logger.info("Telegram service initialized")
@@ -55,13 +55,6 @@ class TelegramService:
             logger.debug(
                 "Telegram not configured (missing bot_token or chat_id)"
             )
-
-    @property
-    def bot(self) -> Optional[Bot]:
-        """Get or create the Telegram bot instance."""
-        if self._bot is None and self.bot_token:
-            self._bot = Bot(token=self.bot_token)
-        return self._bot
 
     def send_message(
         self,
@@ -88,29 +81,38 @@ class TelegramService:
             logger.debug("Telegram not enabled, skipping message")
             return False
 
-        if not self.bot:
-            logger.error("Telegram bot not initialized")
-            return False
-
         try:
-            # Send message
-            self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=parse_mode,
-            )
+            # Send message using Telegram Bot API
+            payload = {
+                'chat_id': self.chat_id,
+                'text': message,
+                'parse_mode': parse_mode,
+            }
+            
+            response = requests.post(self.api_url, json=payload, timeout=10)
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            if result.get('ok'):
+                logger.info(f"Telegram message sent to chat {self.chat_id}")
+                return True
+            else:
+                error_msg = result.get('description', 'Unknown error')
+                raise TelegramError(f"Telegram API error: {error_msg}")
 
-            logger.info(f"Telegram message sent to chat {self.chat_id}")
-            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error sending Telegram message: {e}")
+            
+            # Retry once on network errors
+            if retry_count < 1:
+                logger.info("Retrying Telegram message...")
+                return self.send_message(message, parse_mode, retry_count + 1)
+            
+            return False
 
         except TelegramError as e:
             logger.error(f"Telegram API error: {e}")
-
-            # Retry once on network errors
-            if retry_count < 1 and "network" in str(e).lower():
-                logger.info("Retrying Telegram message...")
-                return self.send_message(message, parse_mode, retry_count + 1)
-
             return False
 
         except Exception as e:
@@ -189,21 +191,9 @@ class TelegramService:
 
         return message
 
-    def close(self) -> None:
-        """Close the bot session and release resources."""
-        if self._bot:
-            try:
-                # Note: python-telegram-bot doesn't have a close method
-                # This is here for API consistency
-                pass
-            except Exception as e:
-                logger.error(f"Error closing Telegram bot: {e}")
-            finally:
-                self._bot = None
-
     def __del__(self) -> None:
         """Destructor to ensure resources are released."""
-        self.close()
+        pass
 
 
 def send_alert(message: str) -> bool:
