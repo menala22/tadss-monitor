@@ -310,19 +310,22 @@ class DataFetcher:
                 # Validate and clean data
                 df = self._validate_and_clean(df, symbol)
 
-                # Save to cache for CCXT and Gate.io
-                # (Twelve Data saves internally; yfinance not cached by design)
-                if detected_source in ("ccxt", "gateio"):
-                    try:
-                        from src.services.ohlcv_cache_manager import OHLCVCacheManager
-                        from src.database import get_db_context
-                        with get_db_context() as db:
-                            cache_mgr = OHLCVCacheManager(db)
-                            cache_mgr.save_ohlcv(symbol, timeframe, df)
-                    except Exception as cache_err:
-                        self.logger.warning(
-                            f"Cache save failed for {symbol} {timeframe}: {cache_err}"
-                        )
+                # Save to cache under the ORIGINAL requested timeframe so
+                # position lookups (using p.timeframe) always find a match,
+                # even when the source fell back to a different interval
+                # (e.g. Twelve Data free tier: h4 → 1h fallback).
+                # Twelve Data also saves internally under validated_tf; the
+                # duplicate save is harmless (save_ohlcv skips existing rows).
+                try:
+                    from src.services.ohlcv_cache_manager import OHLCVCacheManager
+                    from src.database import get_db_context
+                    with get_db_context() as db:
+                        cache_mgr = OHLCVCacheManager(db)
+                        cache_mgr.save_ohlcv(symbol, timeframe, df)
+                except Exception as cache_err:
+                    self.logger.warning(
+                        f"Cache save failed for {symbol} {timeframe}: {cache_err}"
+                    )
 
                 self.logger.info(
                     f"Successfully fetched {len(df)} candles for {symbol}"
