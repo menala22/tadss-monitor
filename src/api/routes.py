@@ -6,7 +6,7 @@ trading positions (create, list, close) and monitoring scheduler status.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -113,26 +113,76 @@ def open_position(
     "/open",
     response_model=List[PositionWithPnL],
     summary="List all open positions",
-    description="Retrieve all currently open positions with their details.",
+    description="Retrieve all currently open positions with their details, current price, and PnL.",
 )
 def list_open_positions(
     db: Session = Depends(get_db_session),
 ) -> List[PositionWithPnL]:
     """
-    List all open positions.
+    List all open positions with current price and PnL from cache.
+    
+    If cache is missing or stale (>5 min old), fetches fresh data from API.
 
-    Returns all positions that have not been closed yet.
+    This endpoint reads OHLCV data from the cache database instead of
+    fetching from external APIs, ensuring fast response times and
+    zero API calls on dashboard refresh.
 
     Args:
         db: Database session (injected).
 
     Returns:
-        List of open positions with full details.
+        List of open positions with full details including current_price and PnL.
     """
+    from src.services.ohlcv_cache_manager import OHLCVCacheManager
+    from datetime import timedelta
+    
     service = PositionService(db)
     positions = service.get_open_positions()
+    cache_mgr = OHLCVCacheManager(db)
+    
+    logger.info(f"Fetching {len(positions)} open positions from cache")
+    
+    result = []
+    for p in positions:
+        # Get cached OHLCV data (no API call!)
+        cached_df = cache_mgr.get_cached_ohlcv(p.pair, p.timeframe, limit=1)
+        
+        # Check if cache is stale (older than 5 minutes)
+        cache_fresh = False
+        if cached_df is not None and not cached_df.empty:
+            last_candle_time = cached_df.index[-1]
+            time_diff = datetime.utcnow() - last_candle_time
+            cache_fresh = time_diff < timedelta(minutes=5)
+        
+        logger.debug(f"Position {p.pair} {p.timeframe}: cache={'HIT' if cached_df is not None and not cached_df.empty else 'MISS'}, fresh={cache_fresh}")
+        
+        position_dict = PositionWithPnL.model_validate(p)
+        
+        if cached_df is not None and not cached_df.empty:
+            # Use cached data (fresh or stale) - scheduler keeps cache updated hourly
+            position_dict.current_price = float(cached_df['Close'].iloc[-1])
 
-    return [PositionWithPnL.model_validate(p) for p in positions]
+            # Calculate PnL
+            if p.position_type.value == "LONG":
+                pnl_pct = ((position_dict.current_price - p.entry_price) / p.entry_price) * 100
+            else:
+                pnl_pct = ((p.entry_price - position_dict.current_price) / p.entry_price) * 100
+
+            position_dict.unrealized_pnl_pct = round(pnl_pct, 2)
+            position_dict.unrealized_pnl = position_dict.current_price - p.entry_price
+            freshness = "FRESH" if cache_fresh else "STALE"
+            logger.debug(f"  -> Using {freshness} cache: current_price={position_dict.current_price}, pnl={pnl_pct:.2f}%")
+        else:
+            # No cache at all - fall back to entry price until scheduler runs
+            logger.info(f"  -> No cache for {p.pair} {p.timeframe}, using entry price (scheduler will populate cache)")
+            position_dict.current_price = p.entry_price
+            position_dict.unrealized_pnl = 0.0
+            position_dict.unrealized_pnl_pct = 0.0
+        
+        result.append(position_dict)
+    
+    logger.info(f"Returning {len(result)} positions")
+    return result
 
 
 @router.get(

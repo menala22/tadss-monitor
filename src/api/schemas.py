@@ -156,6 +156,10 @@ class PositionWithPnL(PositionResponse):
     current_price: Optional[float] = None
     unrealized_pnl: Optional[float] = None
     unrealized_pnl_pct: Optional[float] = None
+    last_signal_status: Optional[str] = None   # Overall signal: BULLISH / BEARISH / NEUTRAL
+    last_ma10_status: Optional[str] = None     # MA10 signal
+    last_ott_status: Optional[str] = None      # OTT signal
+    last_checked_at: Optional[datetime] = None
 
 
 class MessageResponse(BaseModel):

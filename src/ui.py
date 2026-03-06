@@ -10,6 +10,7 @@ Usage:
 """
 
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -39,9 +40,55 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-API_BASE_URL = "http://localhost:8000/api/v1"
+# API Base URL - supports environment variable for production deployment
+# Reads from .env file: API_BASE_URL or VM_EXTERNAL_IP
+# Default: Production mode (Google Cloud VM)
+# Fallback: http://localhost:8000/api/v1 (local development)
+
+# Try to load from .env file first
+def _load_api_url_from_env():
+    """Load API URL from .env file if it exists."""
+    env_file = Path(__file__).parent.parent / '.env'
+    if env_file.exists():
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            if key.strip() == 'API_BASE_URL':
+                                return value.strip()
+                            elif key.strip() == 'VM_EXTERNAL_IP':
+                                vm_ip = value.strip()
+                                if vm_ip and vm_ip != 'your_vm_external_ip_here':
+                                    return f"http://{vm_ip}:8000/api/v1"
+        except Exception:
+            pass
+    return None
+
+# Priority: 1) Environment variable, 2) .env file, 3) Default localhost
+API_BASE_URL = os.getenv("API_BASE_URL") or _load_api_url_from_env() or "http://localhost:8000/api/v1"
 DASHBOARD_VERSION = "v1.0.0"
 AUTO_REFRESH_INTERVAL_SECONDS = 3600  # 1 hour
+
+
+def get_current_api_url() -> str:
+    """
+    Get the current API URL, considering session state overrides.
+
+    Priority:
+    1. Session state override (from Settings page toggle)
+    2. Environment variable API_BASE_URL
+    3. Default localhost
+
+    Returns:
+        Current API base URL.
+    """
+    # Check for session state override (from Settings page)
+    if hasattr(st, "session_state") and "api_base_url_override" in st.session_state:
+        return st.session_state.api_base_url_override
+    return API_BASE_URL
 
 # =============================================================================
 # Caching Functions
@@ -51,16 +98,16 @@ AUTO_REFRESH_INTERVAL_SECONDS = 3600  # 1 hour
 def fetch_open_positions_cached() -> Optional[List[Dict[str, Any]]]:
     """
     Fetch open positions from API with caching.
-    
+
     Cache TTL: 30 seconds to balance freshness and performance.
-    
+
     Returns:
         List of position dictionaries, or None if API is unavailable.
     """
     try:
         response = requests.get(
-            f"{API_BASE_URL}/positions/open",
-            timeout=10,
+            f"{get_current_api_url()}/positions/open",
+            timeout=60,  # Increased from 10 to 60 seconds (API can be slow)
         )
         response.raise_for_status()
         return response.json()
@@ -71,17 +118,17 @@ def fetch_open_positions_cached() -> Optional[List[Dict[str, Any]]]:
 def fetch_open_positions_from_api() -> Optional[List[Dict[str, Any]]]:
     """
     Fetch open positions from API WITHOUT caching.
-    
+
     Use this for main dashboard to ensure fresh data.
     The cached version is only for sidebar stats.
-    
+
     Returns:
         List of position dictionaries, or None if API is unavailable.
     """
     try:
         response = requests.get(
-            f"{API_BASE_URL}/positions/open",
-            timeout=10,
+            f"{get_current_api_url()}/positions/open",
+            timeout=60,  # Increased from 10 to 60 seconds
         )
         response.raise_for_status()
         return response.json()
@@ -93,15 +140,15 @@ def fetch_open_positions_from_api() -> Optional[List[Dict[str, Any]]]:
 def get_system_info_cached() -> Dict[str, Any]:
     """
     Fetch system information from API with caching.
-    
+
     Cache TTL: 60 seconds (system info doesn't change often).
-    
+
     Returns:
         Dictionary with system information.
     """
     try:
         response = requests.get(
-            f"{API_BASE_URL}/positions/scheduler/status",
+            f"{get_current_api_url()}/positions/scheduler/status",
             timeout=5,
         )
         response.raise_for_status()
@@ -114,15 +161,43 @@ def get_system_info_cached() -> Dict[str, Any]:
         }
 
 
+def test_api_connection(api_url: str = None) -> tuple[bool, str]:
+    """
+    Test connection to the API server.
+
+    Args:
+        api_url: Optional API URL to test (uses current if not provided).
+
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    test_url = api_url if api_url else get_current_api_url()
+    # Health endpoint is at the root (e.g. http://host:8000/health),
+    # not under /api/v1 — strip the API path prefix.
+    health_base = test_url.split("/api/")[0] if "/api/" in test_url else test_url
+    try:
+        response = requests.get(f"{health_base}/health", timeout=5)
+        response.raise_for_status()
+        return True, f"✅ Connected to {test_url}"
+    except requests.exceptions.ConnectionError:
+        return False, f"❌ Connection failed: {test_url}"
+    except requests.exceptions.Timeout:
+        return False, f"❌ Timeout: {test_url}"
+    except requests.exceptions.HTTPError as e:
+        return False, f"❌ HTTP error {e.response.status_code}: {test_url}"
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
+
+
 def fetch_position_with_signals_simple(position: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Fetch position data with signals - SIMPLIFIED and FAST.
 
-    This version fetches current price from API but doesn't calculate full signals.
-    Shows basic position info on the main table with REAL current prices.
+    This version uses current_price from API cache (no additional API calls).
+    Shows basic position info on the main table.
 
     Args:
-        position: Position dictionary from API.
+        position: Position dictionary from API (includes current_price from cache).
 
     Returns:
         Dictionary with basic position data including current price.
@@ -132,100 +207,35 @@ def fetch_position_with_signals_simple(position: Dict[str, Any]) -> Optional[Dic
         position_type = position.get("position_type", "LONG")
         pair = position.get("pair", "")
         timeframe = position.get("timeframe", "h4")
-
-        # Fetch current price (quick, just latest price)
-        try:
-            pair_clean = pair.replace("-", "").replace("/", "").replace("_", "").upper()
-            
-            # Crypto pairs: contain crypto symbols or end with USD/USDT
-            crypto_keywords = ["BTC", "ETH", "SOL", "DOGE", "XRP", "ADA", "DOT", "LTC", "BCH", "LINK", "AVAX", "MATIC", "UNI", "ATOM"]
-            is_likely_crypto = any(keyword in pair_clean for keyword in crypto_keywords) or pair_clean.endswith("USD") or pair_clean.endswith("USDT")
-            
-            # Default to CCXT for crypto, yfinance for stocks
-            source = "ccxt" if is_likely_crypto else "yfinance"
-
-            fetcher = DataFetcher(source=source, retry_attempts=1, retry_delay=0.3)
-            df = fetcher.get_ohlcv(
-                symbol=pair,
-                timeframe=timeframe,
-                limit=100,  # Get enough for signals
-            )
-            fetcher.close()
-
-            if not df.empty:
-                df = df.rename(columns={col: col.lower() for col in df.columns})
-                current_price = float(df["close"].iloc[-1])
-                
-                # Calculate quick signals for health status
-                analyzer = TechnicalAnalyzer()
-                signal = analyzer.analyze_position(
-                    df=df,
-                    pair=pair,
-                    position_type=PositionType[position_type],
-                    timeframe=timeframe,
-                )
-                
-                bullish_count = signal.bullish_count
-                bearish_count = signal.bearish_count
-                neutral_count = signal.neutral_count
-                signal_states = signal.signal_states
-            else:
-                current_price = entry_price
-                bullish_count = bearish_count = neutral_count = 0
-                signal_states = {}
-        except Exception:
+        
+        # Use current_price from API response (already from cache!)
+        # This avoids making additional API calls per position
+        current_price = position.get("current_price")
+        
+        if current_price is None:
+            # Fallback to entry price if no cache available
             current_price = entry_price
-            bullish_count = bearish_count = neutral_count = 0
-            signal_states = {}
-
+        
         # Calculate PnL
         if position_type == "LONG":
             pnl_pct = ((current_price - entry_price) / entry_price) * 100
         else:
             pnl_pct = ((entry_price - current_price) / entry_price) * 100
 
-        # Calculate health status using alignment-based logic (includes OTT - 6 indicators)
-        is_long = position_type == "LONG"
-        
-        # Count all 6 signals (includes OTT for comprehensive analysis)
-        # signal_states keys: MA10, MA20, MA50, MACD, RSI, OTT, values
-        signal_keys_6 = ["MA10", "MA20", "MA50", "MACD", "RSI", "OTT"]
-        bullish_6 = sum(1 for k in signal_keys_6 if signal_states.get(k) in ["BULLISH", "OVERBOUGHT"])
-        bearish_6 = sum(1 for k in signal_keys_6 if signal_states.get(k) in ["BEARISH", "OVERSOLD"])
-        total_decisive = bullish_6 + bearish_6
+        # Use stored signal status from DB (set by scheduler, no live API call needed)
+        last_signal = position.get("last_signal_status")  # "BULLISH", "BEARISH", or None
+        signal_summary = last_signal if last_signal in ("BULLISH", "BEARISH") else "NEUTRAL"
 
-        if total_decisive == 0:
+        # Derive health from signal alignment with position direction
+        if signal_summary == "BULLISH":
+            health_status = "HEALTHY" if position_type == "LONG" else "CRITICAL"
+        elif signal_summary == "BEARISH":
+            health_status = "CRITICAL" if position_type == "LONG" else "HEALTHY"
+        else:
             health_status = "NEUTRAL"
-        else:
-            # Calculate alignment with position direction
-            aligned_count = bullish_6 if is_long else bearish_6
-            alignment_pct = (aligned_count / total_decisive) * 100
 
-            # Use signal engine health logic
-            rsi_state = signal_states.get("RSI")
-            is_overbought = rsi_state == "OVERBOUGHT" or (hasattr(rsi_state, 'value') and rsi_state.value == "OVERBOUGHT")
-            is_oversold = rsi_state == "OVERSOLD" or (hasattr(rsi_state, 'value') and rsi_state.value == "OVERSOLD")
-
-            if alignment_pct >= 60:
-                if (is_long and is_overbought) or (not is_long and is_oversold):
-                    health_status = "WARNING"
-                else:
-                    health_status = "HEALTHY"
-            elif alignment_pct <= 20:
-                if (is_long and is_oversold) or (not is_long and is_overbought):
-                    health_status = "WARNING"
-                else:
-                    health_status = "CRITICAL"
-            else:
-                health_status = "WARNING"
-
-        # Overall status - use 6 indicators (includes OTT)
-        if bullish_6 > bearish_6:
-            signal_summary = "BULLISH"
-        elif bearish_6 > bullish_6:
-            signal_summary = "BEARISH"
-        else:
-            signal_summary = "NEUTRAL"
+        bullish_count = bearish_count = neutral_count = 0
+        signal_states = {}
 
         return {
             "position": position,
@@ -234,7 +244,7 @@ def fetch_position_with_signals_simple(position: Dict[str, Any]) -> Optional[Dic
             "overall_status": signal_summary,
             "health_status": health_status,
             "signals": signal_states,
-            "indicator_values": signal.indicators if total_decisive > 0 else {},
+            "indicator_values": {},
             "bullish_count": bullish_count,
             "bearish_count": bearish_count,
             "neutral_count": neutral_count,
@@ -510,31 +520,6 @@ def get_db_session() -> Any:
     return get_db_context()
 
 
-def fetch_open_positions_from_api() -> Optional[List[Dict[str, Any]]]:
-    """
-    Fetch open positions from FastAPI endpoint.
-
-    Returns:
-        List of position dictionaries, or None if API is unavailable.
-    """
-    try:
-        response = requests.get(
-            f"{API_BASE_URL}/positions/open",
-            timeout=10,
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        logger.error("API connection failed - is the server running?")
-        return None
-    except requests.exceptions.Timeout:
-        logger.error("API request timed out")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API request failed: {e}")
-        return None
-
-
 def refresh_position_signals(position_id: int) -> Optional[Dict[str, Any]]:
     """
     Manually refresh signals for a specific position.
@@ -551,7 +536,7 @@ def refresh_position_signals(position_id: int) -> Optional[Dict[str, Any]]:
         # For now, we fetch fresh data directly
         # In production, this would call a refresh endpoint
         response = requests.get(
-            f"{API_BASE_URL}/positions/{position_id}",
+            f"{get_current_api_url()}/positions/{position_id}",
             timeout=10,
         )
         response.raise_for_status()
@@ -1543,7 +1528,7 @@ def render_position_detail(position_data: Dict[str, Any]) -> None:
                         # Call API to close position
                         position_id = position.get("id")
                         response = requests.post(
-                            f"{API_BASE_URL}/positions/{position_id}/close",
+                            f"{get_current_api_url()}/positions/{position_id}/close",
                             json={"close_price": close_price},
                             timeout=10,
                         )
@@ -1585,7 +1570,7 @@ def render_position_detail(position_data: Dict[str, Any]) -> None:
                     # Call API to delete position
                     position_id = position.get("id")
                     response = requests.delete(
-                        f"{API_BASE_URL}/positions/{position_id}",
+                        f"{get_current_api_url()}/positions/{position_id}",
                         timeout=10,
                     )
                     response.raise_for_status()
@@ -1942,7 +1927,7 @@ def render_add_position_page() -> None:
                     }
 
                     response = requests.post(
-                        f"{API_BASE_URL}/positions/open",
+                        f"{get_current_api_url()}/positions/open",
                         json=payload,
                         timeout=10,
                     )
@@ -2016,8 +2001,105 @@ def render_settings_page() -> None:
     st.title("⚙️ Settings")
     st.subheader("System Configuration & Status")
 
+    # API Connection Settings
+    st.subheader("🔗 API Connection")
+
+    # Show current API URL
+    st.info(f"**API URL:** `{API_BASE_URL}`")
+
+    # API Mode selector
+    st.markdown("**Select API Mode:**")
+
+    # Determine current mode
+    is_production = API_BASE_URL != "http://localhost:8000/api/v1"
+    current_mode = "production" if is_production else "local"
+
+    # Clear session state override if .env changed (detect IP mismatch)
+    import re
+    match = re.search(r'http://(\d+\.\d+\.\d+\.\d+):', API_BASE_URL)
+    current_vm_ip = match.group(1) if match else None
+    
+    if current_vm_ip and "api_base_url_override" in st.session_state:
+        override_match = re.search(r'http://(\d+\.\d+\.\d+\.\d+):', st.session_state.api_base_url_override)
+        if override_match and override_match.group(1) != current_vm_ip:
+            # .env has different IP than session state - clear session state
+            del st.session_state.api_base_url_override
+            st.info(f"🔄 Detected VM IP change. Updated to {current_vm_ip}")
+    
+    # Store VM IP in session state - always read fresh from .env
+    if "vm_external_ip" not in st.session_state or st.session_state.vm_external_ip != current_vm_ip:
+        st.session_state.vm_external_ip = current_vm_ip if current_vm_ip else "35.188.118.182"
+
+    # Mode selector using radio buttons
+    selected_mode = st.radio(
+        "API Connection:",
+        options=["local", "production"],
+        index=1 if is_production else 0,
+        format_func=lambda x: "🌐 Production (Google Cloud)" if x == "production" else "💻 Local Development",
+        key="api_mode_selector"
+    )
+
+    # Handle mode switch
+    if selected_mode != current_mode:
+        if selected_mode == "production":
+            new_api_url = f"http://{st.session_state.vm_external_ip}:8000/api/v1"
+            st.session_state.api_base_url_override = new_api_url
+            st.success(f"✅ Switched to **Production Mode**")
+            st.info(f"API URL: `{new_api_url}`")
+            st.markdown("⚠️ **Note:** You need to restart the dashboard for this change to take effect.")
+            st.markdown(
+                f"""
+                **Or run this command:**
+                ```bash
+                API_BASE_URL={new_api_url} streamlit run src/ui.py --server.port 8503
+                ```
+                """
+            )
+        else:
+            st.session_state.api_base_url_override = "http://localhost:8000/api/v1"
+            st.success("✅ Switched to **Local Mode**")
+            st.info("API URL: `http://localhost:8000/api/v1`")
+            st.markdown("⚠️ **Note:** You need to restart the dashboard for this change to take effect.")
+
+    # VM IP configuration (for production mode)
+    if selected_mode == "production":
+        st.divider()
+        st.markdown("**Google Cloud VM Configuration:**")
+        new_vm_ip = st.text_input(
+            "VM External IP:",
+            value=st.session_state.vm_external_ip,
+            key="vm_ip_input",
+            help="Your Google Cloud VM's external IP address"
+        )
+        if new_vm_ip != st.session_state.vm_external_ip:
+            st.session_state.vm_external_ip = new_vm_ip
+            st.success(f"✅ VM IP updated to `{new_vm_ip}`")
+            st.info("Switch to Production mode above to use this IP.")
+
+    # Test connection button
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        if st.button("🔌 Test Connection", use_container_width=True):
+            with st.spinner("Testing..."):
+                # Use the currently selected mode's URL
+                # Only use session state override if it's a valid URL
+                override = st.session_state.get("api_base_url_override")
+                if override and override.startswith("http"):
+                    test_url = override
+                else:
+                    test_url = get_current_api_url()
+                
+                st.info(f"Testing: {test_url}")  # DEBUG: Show what URL we're testing
+                success, message = test_api_connection(test_url)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+    st.divider()
+
     # Telegram Settings
-    st.section("📱 Telegram Notifications")
+    st.subheader("📱 Telegram Notifications")
 
     telegram_configured = bool(settings.telegram_bot_token and settings.telegram_chat_id)
 
@@ -2059,7 +2141,7 @@ def render_settings_page() -> None:
     st.divider()
 
     # Monitoring Settings
-    st.section("⏰ Monitoring Schedule")
+    st.subheader("⏰ Monitoring Schedule")
 
     # Get scheduler status from API
     try:
@@ -2093,7 +2175,7 @@ def render_settings_page() -> None:
     st.divider()
 
     # Alert Thresholds
-    st.section("🚨 Alert Thresholds")
+    st.subheader("🚨 Alert Thresholds")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -2115,7 +2197,7 @@ def render_settings_page() -> None:
     st.divider()
 
     # System Information
-    st.section("ℹ️ System Information")
+    st.subheader("ℹ️ System Information")
 
     # Database path
     db_path = settings.database_url.replace("sqlite:///", "")
@@ -2163,7 +2245,7 @@ def render_settings_page() -> None:
     st.divider()
 
     # Performance Settings
-    st.section("⚡ Performance")
+    st.subheader("⚡ Performance")
 
     st.markdown(
         """
@@ -2185,15 +2267,18 @@ def render_settings_page() -> None:
     st.divider()
 
     # Quick Links
-    st.section("🔗 Quick Links")
+    st.subheader("🔗 Quick Links")
+
+    # Extract base API URL (without /api/v1) for links
+    api_base_server = get_current_api_url().replace("/api/v1", "")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.link_button("📋 API Docs", "http://localhost:8000/docs")
+        st.link_button("📋 API Docs", f"{api_base_server}/docs")
 
     with col2:
-        st.link_button("🏥 Health Check", "http://localhost:8000/health")
+        st.link_button("🏥 Health Check", f"{api_base_server}/health")
 
     with col3:
         st.link_button("📊 Dashboard", "http://localhost:8503")
