@@ -3,6 +3,12 @@ _Last updated: 2026-03-07_
 
 ---
 
+## 2026-03-07 (Session 4)
+Started: Improve dashboard positions table sort order.
+Done: Table now sorted by pair name A→Z then timeframe shortest→longest (using minute-based sort key). Deployed to VM.
+
+---
+
 ## 2026-03-07 (Session 3)
 Started: Improve Telegram alert contradiction warning.
 Done: Replaced binary all-or-nothing MA warning with graduated severity (2/4 ⚠️, 3/4 🔶, 4/4 🚨). Added OTT to the 4 key indicators checked (was only MA10/20/50). Warning now suppressed when reason is "Status changed" to avoid redundancy. Deployed to VM.

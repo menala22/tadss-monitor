@@ -850,6 +850,20 @@ def render_positions_table(positions_data: List[Dict[str, Any]]) -> None:
         st.info("📭 No open positions found. Click '➕ Add New Position' to start tracking.")
         return
 
+    # Sort: 1) pair name A→Z, 2) timeframe shortest→longest
+    _tf_minutes = {
+        'm1': 1, 'm5': 5, 'm15': 15, 'm30': 30,
+        'h1': 60, 'h2': 120, 'h4': 240, 'h6': 360, 'h8': 480, 'h12': 720,
+        'd1': 1440, 'd3': 4320, 'd5': 7200, 'w1': 10080, 'M1': 43200,
+    }
+    positions_data = sorted(
+        positions_data,
+        key=lambda p: (
+            p["position"].get("pair", ""),
+            _tf_minutes.get(p["position"].get("timeframe", "h1"), 999999),
+        ),
+    )
+
     # Prepare data for display
     table_data = []
     for idx, pd in enumerate(positions_data):
