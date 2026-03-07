@@ -1,5 +1,5 @@
 # Task Tracker
-_Last updated: 2026-03-08_
+_Last updated: 2026-03-07_
 
 ---
 
@@ -64,3 +64,9 @@ _(none)_
 - [x] Fix CCXT/Gate.io fetchers not saving to OHLCV cache — completed 2026-03-07
 - [x] Fix XAUUSD h4 cache key mismatch (save under original timeframe) — completed 2026-03-07
 - [x] Remote DB access via sqlite-web + SSH tunnel — completed 2026-03-08
+- [x] Fix Telegram double anti-spam gating (BUG-013) — completed 2026-03-07
+- [x] Fix raw SignalState enums passed to notifier (BUG-014) — completed 2026-03-07
+- [x] Fix OTT missing from Telegram alert message (BUG-015) — completed 2026-03-07
+- [x] Add startup Telegram message on container start — completed 2026-03-07
+- [x] Add daily heartbeat message at 07:00 GMT+7 — completed 2026-03-07
+- [x] Remove GitHub Actions workflow (superseded by VM scheduler) — completed 2026-03-07

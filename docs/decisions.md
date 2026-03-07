@@ -1,5 +1,14 @@
 # Decision Log
-_Last updated: 2026-03-08_
+_Last updated: 2026-03-07_
+
+---
+
+## DEC-011: Remove GitHub Actions workflow — VM scheduler supersedes it
+- **Date**: 2026-03-07
+- **Decision**: Delete `.github/workflows/monitor.yml` and `scripts/github_monitor.py`.
+- **Alternatives considered**: Keep GitHub Actions as a fallback; disable schedule but keep `workflow_dispatch`; archive to a separate folder.
+- **Rationale**: The VM scheduler runs every hour with smart scanning, startup messages, and daily heartbeat — strictly more capable than the 4-hour GitHub Actions cron. Having both caused duplicate Telegram alerts. Git history preserves the code if ever needed. Archiving to a folder adds clutter with no benefit for a solo project.
+- **Consequences**: No automated fallback if the VM goes down. Acceptable because the daily heartbeat at 07:00 GMT+7 serves as a dead-man's switch — silence means the VM is down.
 
 ---
 

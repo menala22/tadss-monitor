@@ -1,5 +1,11 @@
 # Dev Log
-_Last updated: 2026-03-08_
+_Last updated: 2026-03-07_
+
+---
+
+## 2026-03-07 (Session 2)
+Started: Review and improve Telegram alert system.
+Done: Fixed 3 bugs — double anti-spam gating blocked valid alerts, raw SignalState enums passed to notifier (status comparison always wrong), OTT missing from alert message body. Added startup Telegram message on container start and daily heartbeat at 07:00 GMT+7. Removed GitHub Actions workflow (VM scheduler supersedes it). Pushed all changes to GitHub.
 
 ---
 

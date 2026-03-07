@@ -3,6 +3,33 @@ _Last updated: 2026-03-07_
 
 ---
 
+## BUG-015: OTT missing from Telegram alert message body
+- **Status**: Resolved
+- **Found**: 2026-03-07
+- **Resolved**: 2026-03-07
+- **Description**: Telegram alerts showed only 5 indicators (MA10, MA20, MA50, MACD, RSI). OTT was tracked and could trigger alerts but never appeared in the message.
+- **Fix**: Added OTT to the signals loop in `notifier._format_message`. See commit `8ddc6b3`.
+
+---
+
+## BUG-014: Raw SignalState enums passed to notifier — status comparison always wrong
+- **Status**: Resolved
+- **Found**: 2026-03-07
+- **Resolved**: 2026-03-07
+- **Description**: `monitor.py` passed `signal.signal_states` containing `SignalState` enum objects directly to the notifier. `notifier._should_send_alert` compared against string literals (`"BULLISH"`) — always `False` for enums. `_format_message` rendered enum repr (`SignalState.BULLISH`) instead of the value string.
+- **Fix**: `monitor.py` now converts signal_states to a plain `{str: str}` dict before calling notifier. `notifier._should_send_alert` also normalises with `.value` defensively. See commit `8ddc6b3`.
+
+---
+
+## BUG-013: Double anti-spam gating silently blocked valid Telegram alerts
+- **Status**: Resolved
+- **Found**: 2026-03-07
+- **Resolved**: 2026-03-07
+- **Description**: `monitor._should_send_alert` correctly decided to send (6 indicators + MA10 + OTT independent checks), then called `notifier.send_position_alert`. The notifier ran its own `_should_send_alert` using only 5 indicators (no OTT) with broken enum handling — could return `False` even when monitor returned `True`. MA10 and OTT change alerts were silently dropped.
+- **Fix**: `monitor.py` now passes `reason=reason` to `send_position_alert`. Notifier skips its internal gate when `reason` is provided by the caller. See commit `8ddc6b3`.
+
+---
+
 ## BUG-012: XAUUSD h4 cache miss — saved under wrong timeframe key
 - **Status**: Resolved
 - **Found**: 2026-03-07

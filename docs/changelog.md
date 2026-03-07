@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Phase 5: Deployment
 
+### Fixed — 2026-03-07 Session
+- **BUG-013** Double anti-spam gating: `monitor.py` now passes `reason` to `send_position_alert`; notifier skips internal gate when reason is provided
+- **BUG-014** Raw SignalState enums passed to notifier: `monitor.py` converts signal_states to plain `{str: str}` before calling notifier; notifier also normalises defensively
+- **BUG-015** OTT missing from Telegram alert message: added OTT to `notifier._format_message` signals loop
+
+### Added — 2026-03-07 Session
+- **Startup Telegram message**: fires when container starts — shows position count and next check time (`scheduler.py`)
+- **Daily heartbeat message**: fires at 00:00 UTC / 07:00 GMT+7 — confirms system is running (`scheduler.py`)
+
+### Removed — 2026-03-07 Session
+- **GitHub Actions workflow** (`.github/workflows/monitor.yml`) and script (`scripts/github_monitor.py`): VM scheduler runs every hour and is more capable — GitHub Actions every-4-hour cron was redundant and causing duplicate Telegram messages. See DEC-011.
+
+---
+
 ### Added - 2026-03-01 Session
 
 #### OTT (Optimized Trend Tracker) Indicator
