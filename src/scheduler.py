@@ -15,6 +15,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.config import settings
 from src.monitor import PositionMonitor
 from src.database import get_db_context
+from src.models.position_model import Position, PositionStatus
+from src.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,64 @@ class SchedulerManager:
         self.scheduler: Optional[AsyncIOScheduler] = None
         self.monitor: Optional[PositionMonitor] = None
         self._running = False
+
+    def _get_open_positions_count(self) -> int:
+        """Return the number of currently open positions."""
+        try:
+            with get_db_context() as db:
+                return (
+                    db.query(Position)
+                    .filter(Position.status == PositionStatus.OPEN)
+                    .count()
+                )
+        except Exception:
+            return 0
+
+    def _send_startup_message(self) -> None:
+        """Send a Telegram message when the system starts."""
+        try:
+            notifier = TelegramNotifier()
+            if not notifier.enabled:
+                return
+
+            count = self._get_open_positions_count()
+            next_run = self.get_next_run_time()
+            next_run_str = next_run.strftime("%H:%M UTC") if next_run else "unknown"
+
+            message = (
+                "✅ *TA-DSS Started*\n\n"
+                f"Monitoring *{count}* open position(s)\n"
+                f"Next check: `{next_run_str}`\n"
+                f"Heartbeat: daily at `07:00 GMT+7`\n\n"
+                f"_🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}_"
+            )
+            notifier.send_custom_message(message)
+            logger.info("Startup Telegram message sent")
+        except Exception as e:
+            logger.warning(f"Failed to send startup message: {e}")
+
+    def _send_daily_heartbeat(self) -> None:
+        """Send a daily Telegram heartbeat to confirm the system is running."""
+        try:
+            notifier = TelegramNotifier()
+            if not notifier.enabled:
+                return
+
+            count = self._get_open_positions_count()
+            next_run = self.get_next_run_time()
+            next_run_str = next_run.strftime("%H:%M UTC") if next_run else "unknown"
+
+            message = (
+                "💓 *TA-DSS Heartbeat*\n\n"
+                "System is running normally\n"
+                f"Monitoring *{count}* open position(s)\n"
+                f"Next check: `{next_run_str}`\n\n"
+                f"_🕒 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}_"
+            )
+            notifier.send_custom_message(message)
+            logger.info("Daily heartbeat sent")
+        except Exception as e:
+            logger.warning(f"Failed to send daily heartbeat: {e}")
 
     def start(self) -> None:
         """
@@ -85,9 +145,25 @@ class SchedulerManager:
             max_instances=1,
         )
 
+        # Daily heartbeat: 00:00 UTC = 07:00 GMT+7
+        self.scheduler.add_job(
+            func=self._send_daily_heartbeat,
+            trigger='cron',
+            hour=0,
+            minute=0,
+            id="daily_heartbeat",
+            name="Daily System Heartbeat",
+            replace_existing=True,
+            max_instances=1,
+        )
+
         logger.info(
             "Scheduled 'position_monitoring' job "
             "(runs every hour at :10 minutes past the hour)"
+        )
+        logger.info(
+            "Scheduled 'daily_heartbeat' job "
+            "(runs daily at 00:00 UTC / 07:00 GMT+7)"
         )
 
         # Start scheduler in background thread
@@ -95,6 +171,9 @@ class SchedulerManager:
         self._running = True
 
         logger.info("Scheduler started successfully (first run in 10 minutes)")
+
+        # Send startup notification
+        self._send_startup_message()
 
     def stop(self) -> None:
         """
@@ -232,7 +311,7 @@ def get_scheduler_status() -> dict[str, Any]:
     return {
         "running": _scheduler_manager.is_running(),
         "next_run_time": _scheduler_manager.get_next_run_time(),
-        "job_count": 1,  # We have one monitoring job
+        "job_count": 2,  # position_monitoring + daily_heartbeat
     }
 
 

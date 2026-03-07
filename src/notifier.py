@@ -115,13 +115,18 @@ class TelegramNotifier:
         if is_daily_summary:
             return True, "Daily summary"
 
-        # Get current overall status (majority signal)
-        signal_states = [
+        # Get current overall status (majority signal, all 6 indicators)
+        raw_states = [
             signals.get("MA10"),
             signals.get("MA20"),
             signals.get("MA50"),
             signals.get("MACD"),
             signals.get("RSI"),
+            signals.get("OTT"),
+        ]
+        # Normalise: extract .value from enums if present
+        signal_states = [
+            (s.value if hasattr(s, 'value') else s) for s in raw_states
         ]
 
         bullish_count = sum(1 for s in signal_states if s in ["BULLISH", "OVERBOUGHT"])
@@ -208,7 +213,7 @@ class TelegramNotifier:
         }
 
         signals_text = ""
-        for key in ["MA10", "MA20", "MA50", "MACD", "RSI"]:
+        for key in ["MA10", "MA20", "MA50", "MACD", "RSI", "OTT"]:
             status = signals.get(key, "N/A")
             emoji = signal_emojis.get(status, "❓")
             signals_text += f"{emoji} `{key}: {status}`\n"
@@ -254,6 +259,7 @@ class TelegramNotifier:
         previous_status: Optional[str],
         current_price: float,
         is_daily_summary: bool = False,
+        reason: Optional[str] = None,
     ) -> bool:
         """
         Send a position health alert to Telegram.
@@ -310,13 +316,17 @@ class TelegramNotifier:
         else:  # SHORT
             price_movement_pct = ((entry_price - current_price) / entry_price) * 100
 
-        # Check anti-spam logic
-        should_send, reason = self._should_send_alert(
-            signals=signals,
-            previous_status=previous_status,
-            price_movement_pct=price_movement_pct,
-            is_daily_summary=is_daily_summary,
-        )
+        # Anti-spam logic: if caller already decided to send (and provided reason),
+        # skip the internal check to avoid double-gating valid alerts.
+        if reason is not None:
+            should_send = True
+        else:
+            should_send, reason = self._should_send_alert(
+                signals=signals,
+                previous_status=previous_status,
+                price_movement_pct=price_movement_pct,
+                is_daily_summary=is_daily_summary,
+            )
 
         # Determine alert type and current status
         if is_daily_summary:

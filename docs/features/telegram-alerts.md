@@ -1,6 +1,6 @@
 # Telegram Alert System - Complete Guide
 
-**Last Updated:** 2026-03-01  
+**Last Updated:** 2026-03-07
 **Status:** ✅ Production Ready
 
 ---
@@ -11,8 +11,9 @@
 2. [Configuration](#configuration)
 3. [Alert Trigger Scenarios](#alert-trigger-scenarios)
 4. [Signal Calculation Logic](#signal-calculation-logic)
-5. [Bug History & Troubleshooting](#bug-history--troubleshooting)
-6. [Code Reference](#code-reference)
+5. [Smart Scanning](#smart-scanning)
+6. [Bug History & Troubleshooting](#bug-history--troubleshooting)
+7. [Code Reference](#code-reference)
 
 ---
 
@@ -444,6 +445,30 @@ else:
 
 ---
 
+## Smart Scanning
+
+To reduce API calls, positions are only checked when enough time has passed since the last check — based on their timeframe.
+
+```python
+TIMEFRAME_CHECK_INTERVAL = {
+    'h1': 60,    # check at most every 60 min
+    'h4': 240,   # check at most every 4 h
+    'd1': 1440,  # check at most every 24 h
+    # ... (full table in src/monitor.py)
+}
+```
+
+**How it works:**
+
+- Every scheduled run (`check_all_positions`) fetches all OPEN positions.
+- For each position, `_should_check_position()` compares `last_checked_at` vs `now`.
+- Positions checked too recently are skipped; skipped count is logged.
+- First-time positions (`last_checked_at = NULL`) are always checked.
+
+**Caveat:** The `run-now` API endpoint also goes through `check_all_positions`, so smart scanning applies there too — recently-checked positions will be skipped even on a manual trigger.
+
+---
+
 ## Bug History & Troubleshooting
 
 ### Bug #1: Inconsistent Indicator Counts
@@ -607,7 +632,58 @@ elif health_status == "NEUTRAL":
 
 ---
 
+### Bug #6: Double Anti-Spam Gating Blocked Valid Alerts
+
+**Symptom:** MA10 or OTT change alerts decided by `monitor.py` were silently dropped.
+
+**Root Cause:**
+`monitor._check_single_position` calls `_should_send_alert` (correct logic: 6 indicators + MA10 + OTT independent checks) and decides `should_alert=True`. It then calls `notifier.send_position_alert`, which ran its **own** `_should_send_alert` — a weaker version using only 5 indicators (no OTT) and broken enum handling. The second gate could return `False` even though the first gate returned `True`.
+
+**Fix:**
+- `monitor.py` now passes `reason=reason` into `send_position_alert`.
+- `notifier.send_position_alert` skips its internal anti-spam check when `reason` is provided by the caller.
+- For standalone use (no `reason` passed), the internal check still runs.
+
+**Files Changed:** `src/monitor.py`, `src/notifier.py`
+
+---
+
+### Bug #7: SignalState Enums Passed Raw to Notifier
+
+**Symptom:** Notifier's status recalculation was always wrong; `_format_message` would display `SignalState.BULLISH` instead of `BULLISH`.
+
+**Root Cause:**
+`monitor.py` passed `signal.signal_states` (which may contain `SignalState` enum objects) directly. `notifier._should_send_alert` compared against string literals like `"BULLISH"` — always False for enums. `_format_message` would render the enum repr.
+
+**Fix:**
+- `monitor.py` now converts signal_states to a plain `{str: str}` dict before passing to notifier.
+- `notifier._should_send_alert` also normalises with `.value` as a defensive fallback.
+
+**Files Changed:** `src/monitor.py`, `src/notifier.py`
+
+---
+
+### Bug #8: OTT Missing from Telegram Alert Message
+
+**Symptom:** Telegram alerts showed only 5 indicators (MA10, MA20, MA50, MACD, RSI). OTT was tracked and could trigger alerts but never appeared in the message body.
+
+**Fix:** Added OTT to the signals loop in `notifier._format_message`.
+
+**Files Changed:** `src/notifier.py`
+
+---
+
 ## Code Reference
+
+### Alert Decision Flow
+
+Alert logic is split across two files intentionally:
+
+| Step | File | What happens |
+|------|------|--------------|
+| 1 | `monitor._should_send_alert` | Decides whether to alert (6 indicators + MA10 + OTT independent checks) |
+| 2 | `monitor._check_single_position` | Converts signal_states enums → plain strings; calls `send_position_alert(reason=reason)` |
+| 3 | `notifier.send_position_alert` | If `reason` is provided, skips internal anti-spam and goes straight to format + send |
 
 ### Alert Logic (`src/monitor.py`)
 
@@ -616,22 +692,28 @@ def _should_send_alert(self, position, current_status, pnl_pct, signal_states):
     previous_status = position.last_signal_status
     previous_ma10 = position.last_ma10_status
     previous_ott = position.last_ott_status
-    
-    current_ma10 = extract_value(signal_states.get("MA10"))
-    current_ott = extract_value(signal_states.get("OTT"))
-    
+
+    current_ma10 = signal_states.get("MA10", "NEUTRAL")
+    current_ott = signal_states.get("OTT", "NEUTRAL")
+
+    # Extract string value from SignalState enum if present
+    if hasattr(current_ma10, 'value'):
+        current_ma10 = current_ma10.value
+    if hasattr(current_ott, 'value'):
+        current_ott = current_ott.value
+
     # Check 1: Overall status change
     if previous_status and current_status != previous_status:
         return True, f"Status changed: {previous_status} → {current_status}"
-    
+
     # Check 2: MA10 change (independent)
     if previous_ma10 and current_ma10 != previous_ma10:
         return True, f"MA10 Changed: {previous_ma10} → {current_ma10}"
-    
+
     # Check 3: OTT change (independent)
     if previous_ott and current_ott != previous_ott:
         return True, f"OTT Changed: {previous_ott} → {current_ott}"
-    
+
     return False, "No significant change"
 ```
 

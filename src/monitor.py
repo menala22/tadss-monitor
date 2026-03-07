@@ -551,7 +551,13 @@ class PositionMonitor:
 
                 # Format and send Telegram alert with database logging
                 if self.telegram_enabled:
-                    # Use send_position_alert which logs to database
+                    # Convert signal_states enums to plain strings before passing to notifier
+                    signal_states_str = {
+                        k: (v.value if hasattr(v, 'value') else str(v))
+                        for k, v in signal.signal_states.items()
+                    }
+                    # Use send_position_alert which logs to database.
+                    # Pass reason so notifier skips its own anti-spam gate.
                     self._telegram_notifier.send_position_alert(
                         position={
                             'pair': position.pair,
@@ -559,10 +565,11 @@ class PositionMonitor:
                             'entry_price': position.entry_price,
                             'timeframe': position.timeframe,
                         },
-                        signals=signal.signal_states,
+                        signals=signal_states_str,
                         previous_status=position.last_signal_status,
                         current_price=current_price,
                         is_daily_summary=False,
+                        reason=reason,
                     )
                     logger.info(f"Telegram alert sent for {position.pair}")
                 else:
