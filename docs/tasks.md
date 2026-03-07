@@ -26,7 +26,7 @@ _(none)_
   Run: `gcloud compute addresses create tadss-static-ip --region=us-central1`
   See: `docs/archive/ISSUE_DASHBOARD_NO_DATA_2026-03-07.md` for full setup steps.
 
-- [ ] **Task 6: DBeaver SSH Tunnel** — completed as sqlite-web (2026-03-08), see docs/features/dbeaver-connection.md
+- [ ] **Task 6: DBeaver SSH Tunnel** — completed as sqlite-web (2026-03-08), see docs/features/remote-db-access.md
 
 ### UX
 - [ ] **Dashboard row click visual feedback** — Medium (30 min)
