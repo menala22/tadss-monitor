@@ -395,6 +395,7 @@ class Settings(BaseSettings):
     # SECURITY
     # ======================================================================
     secret_key: str = "dev-secret-key-change-in-production"
+    api_secret_key: str | None = None  # Set in .env to enable API key auth
     cors_origins_str: str = "http://localhost:8501,http://localhost:8000"
 
     @property

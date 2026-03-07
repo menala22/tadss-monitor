@@ -12,6 +12,8 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from src.api.auth import verify_api_key
+
 logger = logging.getLogger(__name__)
 
 from src.api.schemas import (
@@ -26,7 +28,11 @@ from src.database import get_db_session
 from src.scheduler import get_scheduler_status
 from src.services.position_service import PositionService
 
-router = APIRouter(prefix="/positions", tags=["positions"])
+router = APIRouter(
+    prefix="/positions",
+    tags=["positions"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 # Note: get_db_session is imported from src.database and used directly as dependency

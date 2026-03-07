@@ -22,10 +22,11 @@ Provides browser-based read access to the production SQLite database on the Goog
 gcloud compute ssh tadss-vm --zone us-central1-a -- -L 8080:localhost:8080
 ```
 
-**Step 2 — On the VM, start sqlite-web:**
+**Step 2 — On the VM, start sqlite-web in read-only mode:**
 ```bash
-~/.local/bin/sqlite_web /home/aiagent/tadss-monitor/data/positions.db --host 127.0.0.1 --port 8080 --no-browser
+~/.local/bin/sqlite_web /home/aiagent/tadss-monitor/data/positions.db --host 127.0.0.1 --port 8080 --no-browser -r
 ```
+The `-r` flag enforces read-only mode — the query editor will reject `INSERT`, `UPDATE`, and `DELETE` statements at the DB level.
 You should see: `* Running on http://127.0.0.1:8080`
 
 **Step 3 — Open in browser:**
@@ -84,7 +85,7 @@ ORDER BY updated_at DESC;
 
 | Risk | Mitigation |
 |------|------------|
-| Accidental writes via query editor | Avoid `INSERT`, `UPDATE`, `DELETE` — no enforcement, discipline only |
+| Accidental writes via query editor | sqlite-web started with `-r` (read-only) — writes rejected at DB level |
 | Data stays inside SSH tunnel | All traffic encrypted — never touches the open internet |
 | No new firewall ports | Port 8080 is local-only via the tunnel, not exposed on the VM |
 
@@ -93,7 +94,7 @@ ORDER BY updated_at DESC;
 ## Known Limitations
 
 - Terminal running sqlite_web must stay open during the session
-- sqlite-web query editor has no read-only enforcement — avoid write queries by discipline
+- sqlite-web started with `-r` flag — write queries will be rejected at the DB level
 - VM IP changes on restart → `gcloud compute ssh` still works by VM name, no action needed
 
 ---

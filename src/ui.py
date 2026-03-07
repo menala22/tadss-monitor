@@ -46,29 +46,45 @@ logger = logging.getLogger(__name__)
 # Fallback: http://localhost:8000/api/v1 (local development)
 
 # Try to load from .env file first
-def _load_api_url_from_env():
-    """Load API URL from .env file if it exists."""
+def _load_env_var_from_file(target_key: str) -> str | None:
+    """Load a single env var from the .env file if it exists."""
     env_file = Path(__file__).parent.parent / '.env'
     if env_file.exists():
         try:
             with open(env_file, 'r') as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith('#'):
-                        if '=' in line:
-                            key, value = line.split('=', 1)
-                            if key.strip() == 'API_BASE_URL':
-                                return value.strip()
-                            elif key.strip() == 'VM_EXTERNAL_IP':
-                                vm_ip = value.strip()
-                                if vm_ip and vm_ip != 'your_vm_external_ip_here':
-                                    return f"http://{vm_ip}:8000/api/v1"
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        if key.strip() == target_key:
+                            v = value.strip()
+                            return v if v and not v.startswith('your_') else None
         except Exception:
             pass
     return None
 
+
+def _load_api_url_from_env() -> str | None:
+    """Load API URL from .env file (checks API_BASE_URL then VM_EXTERNAL_IP)."""
+    api_url = _load_env_var_from_file('API_BASE_URL')
+    if api_url:
+        return api_url
+    vm_ip = _load_env_var_from_file('VM_EXTERNAL_IP')
+    if vm_ip:
+        return f"http://{vm_ip}:8000/api/v1"
+    return None
+
+
 # Priority: 1) Environment variable, 2) .env file, 3) Default localhost
 API_BASE_URL = os.getenv("API_BASE_URL") or _load_api_url_from_env() or "http://localhost:8000/api/v1"
+API_SECRET_KEY = os.getenv("API_SECRET_KEY") or _load_env_var_from_file('API_SECRET_KEY')
+
+
+def get_api_headers() -> dict:
+    """Return auth headers for API requests. Empty dict if no key configured."""
+    if API_SECRET_KEY:
+        return {"X-API-Key": API_SECRET_KEY}
+    return {}
 DASHBOARD_VERSION = "v1.0.0"
 AUTO_REFRESH_INTERVAL_SECONDS = 3600  # 1 hour
 
@@ -107,6 +123,7 @@ def fetch_open_positions_cached() -> Optional[List[Dict[str, Any]]]:
     try:
         response = requests.get(
             f"{get_current_api_url()}/positions/open",
+            headers=get_api_headers(),
             timeout=60,  # Increased from 10 to 60 seconds (API can be slow)
         )
         response.raise_for_status()
@@ -128,6 +145,7 @@ def fetch_open_positions_from_api() -> Optional[List[Dict[str, Any]]]:
     try:
         response = requests.get(
             f"{get_current_api_url()}/positions/open",
+            headers=get_api_headers(),
             timeout=60,  # Increased from 10 to 60 seconds
         )
         response.raise_for_status()
@@ -149,6 +167,7 @@ def get_system_info_cached() -> Dict[str, Any]:
     try:
         response = requests.get(
             f"{get_current_api_url()}/positions/scheduler/status",
+            headers=get_api_headers(),
             timeout=5,
         )
         response.raise_for_status()
@@ -537,6 +556,7 @@ def refresh_position_signals(position_id: int) -> Optional[Dict[str, Any]]:
         # In production, this would call a refresh endpoint
         response = requests.get(
             f"{get_current_api_url()}/positions/{position_id}",
+            headers=get_api_headers(),
             timeout=10,
         )
         response.raise_for_status()
@@ -1544,6 +1564,7 @@ def render_position_detail(position_data: Dict[str, Any]) -> None:
                         response = requests.post(
                             f"{get_current_api_url()}/positions/{position_id}/close",
                             json={"close_price": close_price},
+                            headers=get_api_headers(),
                             timeout=10,
                         )
                         response.raise_for_status()
@@ -1585,6 +1606,7 @@ def render_position_detail(position_data: Dict[str, Any]) -> None:
                     position_id = position.get("id")
                     response = requests.delete(
                         f"{get_current_api_url()}/positions/{position_id}",
+                        headers=get_api_headers(),
                         timeout=10,
                     )
                     response.raise_for_status()
@@ -1943,6 +1965,7 @@ def render_add_position_page() -> None:
                     response = requests.post(
                         f"{get_current_api_url()}/positions/open",
                         json=payload,
+                        headers=get_api_headers(),
                         timeout=10,
                     )
                     response.raise_for_status()
