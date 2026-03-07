@@ -135,11 +135,37 @@ LIMIT 10;
 
 ---
 
+## Security
+
+### Risks and mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Accidental write/delete to production DB | Medium | **Set connection to read-only in DBeaver** (see below) |
+| Stale DB copy left on VM host (Scenario B) | Low-Medium | Delete after session: `rm ~/positions.db` on VM |
+| Trading data transferred to local machine | Low | Don't export to shared/unencrypted folders |
+| SSH key on local machine | Existing risk | Not new — same key used by `gcloud compute ssh` |
+
+### What this does NOT introduce
+- No new open ports — all traffic goes through SSH port 22 (already open)
+- No weaker auth — SSH key auth is stronger than the current API (port 8000, no auth)
+- No network-accessible DB service
+
+### How to set read-only mode in DBeaver
+1. Right-click the connection → **Edit Connection**
+2. **Main** tab → check **"Read-only connection"**
+3. Click OK — DBeaver will now reject any write query with an error before it reaches the DB
+
+Do this **before running any query**. It is the single most important step.
+
+---
+
 ## Key Design Decisions
 
-- **Read-only intent**: DBeaver will be used for queries and exports only. No writes to production DB via DBeaver.
-- **SSH key reuse**: Use the existing gcloud SSH key (`google_compute_engine`) — no new keys needed.
+- **Read-only connection**: DBeaver is for queries and exports only — never writes.
+- **SSH key reuse**: Use the existing gcloud SSH key (`google_compute_engine`) — no new keys or ports needed.
 - **Start with B1 snapshot**: Avoids any container restart risk. Upgrade to live mount only if needed.
+- **Clean up Scenario B copies**: Delete `~/positions.db` from VM host after each session.
 
 ---
 
@@ -161,6 +187,7 @@ Before starting, have these ready:
 - [ ] DBeaver installed and open locally
 - [ ] SSH key exists: `ls ~/.ssh/google_compute_engine`
 - [ ] VM IP known: check `.env` → `API_BASE_URL`
+- [ ] **After connecting: set DBeaver connection to read-only before running any query**
 
 ---
 
@@ -172,7 +199,9 @@ Before starting, have these ready:
 | 2A | If Scenario A: note host path → skip to Step 3 | — |
 | 2B | If Scenario B: `docker cp tadss:/app/data/positions.db /home/<user>/positions.db` | 2 min |
 | 3 | Configure DBeaver SSH connection (see setup above) | 10 min |
-| 4 | Test connection + run verification queries | 5 min |
-| 5 | Export positions to CSV as smoke test | 5 min |
+| 4 | **Set connection to read-only** (right-click → Edit → Main tab) | 1 min |
+| 5 | Test connection + run verification queries | 5 min |
+| 6 | Export positions to CSV as smoke test | 5 min |
+| 7 | If Scenario B: delete DB copy from VM host after session | 1 min |
 
 **Total estimated time: 20–30 minutes**
