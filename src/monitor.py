@@ -16,7 +16,7 @@ Usage:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -41,6 +41,30 @@ file_handler.setFormatter(
 )
 logger.addHandler(file_handler)
 logger.setLevel(logging.INFO)
+
+# =============================================================================
+# SMART SCANNING CONFIGURATION
+# =============================================================================
+
+# Check intervals in minutes for each timeframe
+# Positions are only checked if enough time has passed since last check
+TIMEFRAME_CHECK_INTERVAL = {
+    'm1': 1,       # 1 minute
+    'm5': 5,       # 5 minutes
+    'm15': 15,     # 15 minutes
+    'm30': 30,     # 30 minutes
+    'h1': 60,      # 1 hour
+    'h2': 120,     # 2 hours
+    'h4': 240,     # 4 hours
+    'h6': 360,     # 6 hours
+    'h8': 480,     # 8 hours
+    'h12': 720,    # 12 hours
+    'd1': 1440,    # 24 hours
+    'd3': 4320,    # 3 days
+    'd5': 7200,    # 5 days
+    'w1': 10080,   # 7 days
+    'M1': 43200,   # 30 days
+}
 
 
 class PositionMonitor:
@@ -108,6 +132,36 @@ class PositionMonitor:
 
         # Everything else is crypto
         return "ccxt"
+
+    def _should_check_position(self, position: Position) -> tuple[bool, int]:
+        """
+        Check if position should be scanned based on timeframe.
+        
+        Implements smart scanning strategy to reduce API calls.
+
+        Args:
+            position: Position to check.
+
+        Returns:
+            Tuple of (should_check: bool, minutes_until_next_check: int)
+        """
+        # Get check interval for this timeframe
+        interval_minutes = TIMEFRAME_CHECK_INTERVAL.get(position.timeframe, 60)
+        
+        # If never checked, should check now
+        if position.last_checked_at is None:
+            return True, interval_minutes
+        
+        # Calculate time since last check
+        time_since_last_check = datetime.utcnow() - position.last_checked_at
+        minutes_since_last_check = time_since_last_check.total_seconds() / 60
+        
+        # Check if enough time has passed
+        if minutes_since_last_check >= interval_minutes:
+            return True, interval_minutes
+        else:
+            minutes_remaining = int(interval_minutes - minutes_since_last_check)
+            return False, minutes_remaining
 
     def _fetch_position_data(
         self,
@@ -698,8 +752,22 @@ class PositionMonitor:
                     logger.info("No open positions to monitor")
                     return results
 
-                # Check each position
+                # Check each position with smart scanning
+                skipped_count = 0
                 for position in open_positions:
+                    # Smart scanning: check if enough time has passed
+                    should_check, minutes_remaining = self._should_check_position(position)
+                    
+                    if not should_check:
+                        # Skip this position (not time yet)
+                        skipped_count += 1
+                        logger.debug(
+                            f"Skipping {position.pair} ({position.timeframe}) - "
+                            f"next check in {minutes_remaining} minutes"
+                        )
+                        continue
+                    
+                    # Check this position
                     result = self._check_single_position(position, db)
                     results["results"].append(result)
 
@@ -709,6 +777,10 @@ class PositionMonitor:
                             results["alerts_sent"] += 1
                     else:
                         results["errors"] += 1
+
+                # Log skipped positions
+                if skipped_count > 0:
+                    logger.info(f"Skipped {skipped_count} positions (smart scanning)")
 
                 logger.info(
                     f"Monitoring check completed: "

@@ -191,7 +191,7 @@ def normalize_timeframe_to_source(timeframe: str, source: Literal["yfinance", "c
 
 def validate_timeframe(
     timeframe: str,
-    source: Literal["yfinance", "ccxt"] = "yfinance",
+    source: Literal["yfinance", "ccxt", "twelvedata"] = "twelvedata",
     auto_fallback: bool = True,
 ) -> str:
     """
@@ -205,7 +205,7 @@ def validate_timeframe(
 
     Args:
         timeframe: The timeframe to validate (e.g., 'h4', 'd1', '1h', '4h').
-        source: The data source ('yfinance' or 'ccxt'). Defaults to 'yfinance'.
+        source: The data source ('yfinance', 'ccxt', or 'twelvedata'). Defaults to 'twelvedata'.
         auto_fallback: If True, automatically fallback to nearest supported
             timeframe when the requested one is unavailable. Defaults to True.
 
@@ -231,6 +231,10 @@ def validate_timeframe(
         internal_tf = normalize_timeframe_to_internal(timeframe)
     except ValueError as e:
         raise ValueError(f"Invalid timeframe format '{timeframe}': {e}")
+
+    # For Twelve Data, use yfinance timeframes (they're compatible)
+    if source == "twelvedata":
+        source = "yfinance"
 
     # Convert to source-specific format
     source_tf = normalize_timeframe_to_source(internal_tf, source)
@@ -391,7 +395,12 @@ class Settings(BaseSettings):
     # SECURITY
     # ======================================================================
     secret_key: str = "dev-secret-key-change-in-production"
-    cors_origins: List[str] = ["http://localhost:8501", "http://localhost:8000"]
+    cors_origins_str: str = "http://localhost:8501,http://localhost:8000"
+
+    @property
+    def cors_origins(self) -> List[str]:
+        """Parse CORS origins from comma-separated string."""
+        return [origin.strip() for origin in self.cors_origins_str.split(",") if origin.strip()]
 
     # ======================================================================
     # SCHEDULER
@@ -404,7 +413,9 @@ class Settings(BaseSettings):
     # ======================================================================
     # DATA SOURCE
     # ======================================================================
-    default_data_source: Literal["yfinance", "ccxt"] = "ccxt"
+    default_data_source: Literal["yfinance", "ccxt", "twelvedata"] = "ccxt"
+    ccxt_exchange: str = "kraken"  # Options: binance, kraken, bybit, etc.
+    twelve_data_api_key: str | None = None  # Twelve Data API key (free tier: 800/day)
 
     # ======================================================================
     # RATE LIMITING

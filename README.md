@@ -2,10 +2,11 @@
 
 > **Technical Analysis Decision Support System** for monitoring manually-executed trading positions with automated technical analysis and Telegram alerts.
 
-**Status:** 🟢 Phase 4 Complete - Dashboard & Advanced Features
+**Status:** 🟢 Phase 5 Complete - Production Deployment on Google Cloud
 **Last Updated:** 2026-03-04
 **Python:** 3.12.9
 **Tests:** 117 passing (100%)
+**Deployment:** ✅ Live on Google Cloud (24/7, $0/month)
 
 ---
 
@@ -38,6 +39,7 @@ TA-DSS is a **post-trade monitoring system** for traders who:
 | **Dashboard** | Streamlit UI with 3 pages (Open Positions, Add Position, Settings) | ✅ Complete |
 | **Independent MA10/OTT Tracking** | Separate alerts for MA10 and OTT signal changes | ✅ Complete |
 | **Signal Change Logging** | Track all signal changes for backtesting | ✅ Complete |
+| **24/7 Cloud Deployment** | Google Cloud e2-micro VM (free tier, $0/month) | ✅ Complete |
 
 ---
 
@@ -47,35 +49,37 @@ TA-DSS is a **post-trade monitoring system** for traders who:
 - Python 3.12+ (we use 3.12.9 via pyenv)
 - pip (Python package manager)
 
-### 1. Clone & Setup Environment
+### Option A: Local Development
+
+#### 1. Clone & Setup Environment
 ```bash
 cd trading-order-monitoring-system
 source venv/bin/activate
 ```
 
-### 2. Install Dependencies
+#### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure Environment
+#### 3. Configure Environment
 ```bash
 cp .env.example .env
 # Edit .env with your Telegram credentials
 ```
 
-### 4. Initialize Database
+#### 4. Initialize Database
 ```bash
 python -m src.database init
 ```
 
-### 5. Run Tests (Optional)
+#### 5. Run Tests (Optional)
 ```bash
 pytest tests/ -v
 # Expected: 117 tests passing
 ```
 
-### 6. Start API Server
+#### 6. Start API Server
 ```bash
 uvicorn src.main:app --reload
 ```
@@ -85,15 +89,127 @@ uvicorn src.main:app --reload
 - API Docs: http://localhost:8000/docs
 - Health Check: http://localhost:8000/health
 
-### 7. Launch Dashboard
+#### 7. Launch Dashboard
+
+**Option A: Local Development (API server running on your laptop)**
 ```bash
 streamlit run src/ui.py --server.port 8503
 ```
 
+**Option B: Production API (API server on Google Cloud)**
+
+Choose one of these methods:
+
+**Method 1: Production Script (Recommended)**
+```bash
+./scripts/run-dashboard-production.sh
+```
+
+**Method 2: Environment Variable**
+```bash
+API_BASE_URL=http://VM_EXTERNAL_IP:8000/api/v1 streamlit run src/ui.py --server.port 8503
+```
+
+**Method 3: UI Toggle (In Dashboard Settings)**
+```bash
+# 1. Start dashboard normally
+streamlit run src/ui.py --server.port 8503
+
+# 2. Go to Settings (⚙️) → API Connection
+# 3. Select "🌐 Production (Google Cloud)"
+# 4. Click "Test Connection" to verify
+```
+
 **Access:**
 - Dashboard: http://localhost:8503
-- API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+- API (Local): http://localhost:8000
+- API (Production): http://VM_EXTERNAL_IP:8000 (see `.env`)
+- API Docs: http://localhost:8000/docs or http://VM_EXTERNAL_IP:8000/docs
+
+**Note:** 
+- Local mode: Dashboard connects to `localhost:8000` (API server must run locally)
+- Production mode: Dashboard connects to `VM_EXTERNAL_IP:8000` (Google Cloud API, see `.env`)
+
+---
+
+### Option B: Production Deployment (Google Cloud)
+
+**Already deployed!** The system is running 24/7 on Google Cloud Platform.
+
+**Production VM:** See `.env` file for `VM_EXTERNAL_IP`
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ Google Cloud Platform (us-central1)                     │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐ │
+│  │ e2-micro VM (2 vCPU, 1 GB RAM, 30 GB disk)       │ │
+│  │                                                   │ │
+│  │  ┌─────────────────────────────────────────────┐ │ │
+│  │  │ Docker Container (TA-DSS API + Scheduler)   │ │ │
+│  │  │  - FastAPI :8000 (24/7)                     │ │ │
+│  │  │  - APScheduler (every hour at :10)          │ │ │
+│  │  │  - SQLite Database                          │ │ │
+│  │  │  - Telegram Bot Integration                 │ │ │
+│  │  └─────────────────────────────────────────────┘ │ │
+│  └───────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+         │
+         │ HTTPS API
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│ Your Laptop (Dashboard - On Demand)                     │
+│                                                         │
+│  ./scripts/run-dashboard-production.sh                 │
+│  - Connects to production API                          │
+│  - View positions, charts, alerts                       │
+│  - Run only when needed (not 24/7)                      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Access:**
+- **API:** `http://VM_EXTERNAL_IP:8000` (see `.env`)
+- **API Docs:** `http://VM_EXTERNAL_IP:8000/docs`
+- **Health Check:** `http://VM_EXTERNAL_IP:8000/health`
+
+**Dashboard (3 Ways to Connect to Production):**
+
+**Option 1: Production Script (Recommended)**
+```bash
+./scripts/run-dashboard-production.sh
+```
+
+**Option 2: Environment Variable**
+```bash
+API_BASE_URL=http://VM_EXTERNAL_IP:8000/api/v1 streamlit run src/ui.py --server.port 8503
+```
+
+**Option 3: UI Toggle (In Dashboard)**
+```bash
+# 1. Start dashboard normally
+streamlit run src/ui.py --server.port 8503
+
+# 2. Go to Settings page (⚙️)
+# 3. Select "🌐 Production (Google Cloud)"
+# 4. Click "Test Connection" to verify
+# 5. Go to Open Positions (📋) to view data
+```
+
+- Opens at: http://localhost:8503
+- Connects to production API (see `.env` for `VM_EXTERNAL_IP`)
+- Run only when you want to view positions
+
+**Why This Setup?**
+- ✅ **API + Scheduler:** 24/7 on Google Cloud (no laptop needed)
+- ✅ **Telegram Alerts:** Automatic (sent to your phone)
+- ✅ **Dashboard:** On-demand (open when you want to check positions)
+- ✅ **VM Resources:** Preserved (e2-micro has 1 GB RAM limit)
+- ✅ **Security:** Dashboard not exposed to internet
+
+**Deployment Guide:** See [`DEPLOYMENT_GOOGLE_CLOUD_GUIDE.md`](DEPLOYMENT_GOOGLE_CLOUD_GUIDE.md)
+
+**Cost:** $0/month (Google Cloud free tier)
 
 ---
 
@@ -278,6 +394,8 @@ trading-order-monitoring-system/
 ├── PROJECT_STATUS.md              # Detailed progress report
 ├── CHANGELOG.md                   # Version history
 ├── DEPLOYMENT_GITHUB_ACTIONS.md   # GitHub Actions deployment guide
+├── DEPLOYMENT_GOOGLE_CLOUD_GUIDE.md  # ✅ Google Cloud deployment (PRODUCTION)
+├── DEPLOYMENT_RAILWAY_GUIDE.md    # Railway.app deployment guide
 └── SECURITY_CHECKLIST.md          # Security guidelines
 ```
 
@@ -342,15 +460,16 @@ See [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for detailed progress report.
 
 ---
 
-## 🚧 Next Steps (Phase 5: Deployment)
+## 🚧 Next Steps (Phase 6: Enhancements)
 
-1. **GitHub Actions Deployment** – Scheduled monitoring via GitHub Actions (FREE, 2,000 min/month)
-2. **Docker Deployment** – Container configuration for production VMs
-3. **Real-time Updates** – WebSocket integration for live price updates
-4. **Position Health Visualization** – Charts and graphs for signal trends
-5. **Enhanced Dashboard** – More interactive features and filters
+1. **Multi-timeframe Analysis** – Scan positions across multiple timeframes
+2. **Performance Optimization** – Reduce API call latency, add caching
+3. **Enhanced Dashboard** – Advanced filtering, charts, export features
+4. **Backtesting Module** – Test strategies on historical data
+5. **Position Sizing Calculator** – Risk management tools
+6. **Multiple Strategies** – Run different scan strategies simultaneously
 
-See [`DEPLOYMENT_GITHUB_ACTIONS.md`](DEPLOYMENT_GITHUB_ACTIONS.md) for deployment guide.
+See [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for detailed roadmap.
 
 ---
 
@@ -402,7 +521,61 @@ See [`DEPLOYMENT_GITHUB_ACTIONS.md`](DEPLOYMENT_GITHUB_ACTIONS.md) for deploymen
 
 ---
 
-## 📋 Phase 4 Completion Summary
+## 📋 Phase 5 Completion Summary
+
+**Completed:** 2026-03-04
+
+### Key Achievements (Phase 5 - Production Deployment)
+- ✅ **Google Cloud e2-micro VM deployed** (us-central1 region)
+- ✅ **24/7 operation** - No laptop required
+- ✅ **Free tier** - $0/month (Always Free eligible)
+- ✅ **Docker containerization** - Consistent deployment
+- ✅ **Auto-restart** - Container restarts on failure
+- ✅ **Firewall configured** - Port 8000 open for API access
+- ✅ **Health monitoring** - Google Cloud Monitoring enabled
+- ✅ **Database persistence** - SQLite on persistent disk
+- ✅ **Telegram alerts working** - Production verified
+- ✅ **Scheduler running** - Every hour at :10 minutes
+- ✅ **Backup strategy** - Weekly database backups
+- ✅ **Log rotation** - Prevents disk full issues
+
+### Production Architecture
+```
+┌─────────────────────────────────────────────────────────┐
+│ Google Cloud Platform (us-central1)                     │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐ │
+│  │ e2-micro VM (2 vCPU, 1 GB RAM, 30 GB disk)       │ │
+│  │                                                   │ │
+│  │  ┌─────────────────────────────────────────────┐ │ │
+│  │  │ Docker Container (TA-DSS)                   │ │ │
+│  │  │  - FastAPI :8000                            │ │ │
+│  │  │  - APScheduler (every hour at :10)          │ │ │
+│  │  │  - SQLite Database                          │ │ │
+│  │  │  - Telegram Bot Integration                 │ │ │
+│  │  └─────────────────────────────────────────────┘ │ │
+│  │                                                   │ │
+│  │  Firewall: Port 8000 (API), Port 22 (SSH)        │ │
+│  └───────────────────────────────────────────────────┘ │
+│                                                         │
+│  Access: API from anywhere, SSH from your laptop       │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Production URLs
+- **API:** `http://YOUR_VM_IP:8000`
+- **API Docs:** `http://YOUR_VM_IP:8000/docs`
+- **Health Check:** `http://YOUR_VM_IP:8000/health`
+
+### Deployment Resources
+- **Guide:** [`DEPLOYMENT_GOOGLE_CLOUD_GUIDE.md`](DEPLOYMENT_GOOGLE_CLOUD_GUIDE.md)
+- **Troubleshooting:** Section 9 (Real Deployment Issues)
+- **Monitoring:** Google Cloud Console → Monitoring
+- **Cost:** $0.00/month (verified)
+
+---
+
+## 📋 Phase 4 Completion Summary (Previous)
 
 **Completed:** 2026-03-01
 
@@ -424,12 +597,12 @@ See [`DEPLOYMENT_GITHUB_ACTIONS.md`](DEPLOYMENT_GITHUB_ACTIONS.md) for deploymen
 
 ### What's Working
 1. Log a position via API or Dashboard
-2. Scheduler automatically checks every hour at :10 minutes (XX:10 UTC)
+2. Scheduler automatically checks every hour at :10 (Google Cloud)
 3. Fetches live data from CCXT/yfinance with retry logic
 4. Calculates technical signals (EMA 10/20/50, MACD, RSI, **OTT**)
 5. Compares with previous status (overall + MA10 + OTT independently)
 6. Sends Telegram alert if:
-   - Overall status changed (BULLISH → BEARISH)
+   - Overall status changed (BULLISH ↔ BEARISH)
    - MA10 status changed (independent tracking)
    - OTT status changed (independent tracking)
    - PnL < -5% (Stop Loss Warning)
@@ -437,6 +610,27 @@ See [`DEPLOYMENT_GITHUB_ACTIONS.md`](DEPLOYMENT_GITHUB_ACTIONS.md) for deploymen
 7. Updates database with new status
 8. Logs all signal changes to `signal_changes` table
 9. View all positions on Dashboard with live PnL and signals
+
+### Deployment Architecture
+
+**Production (24/7):**
+- **Platform:** Google Cloud e2-micro VM (us-central1)
+- **Components:** FastAPI API + APScheduler + SQLite Database
+- **Access:** `http://YOUR_VM_IP:8000`
+- **Cost:** $0/month (Always Free tier)
+
+**Dashboard (On-Demand):**
+- **Platform:** Your laptop (local)
+- **Components:** Streamlit UI
+- **Access:** http://localhost:8503 (when running)
+- **Command:** `streamlit run src/ui.py --server.port 8503`
+
+**Why This Setup?**
+- API + Scheduler run 24/7 (no laptop needed)
+- Telegram alerts work automatically (phone notifications)
+- Dashboard runs on-demand (open when you want to view positions)
+- Preserves VM resources (e2-micro has 1 GB RAM limit)
+- Dashboard not exposed to internet (more secure)
 
 ### Dashboard Features
 - 📊 Summary cards (Total, Long, Short, Warnings)

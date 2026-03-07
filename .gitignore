@@ -5,6 +5,27 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# PERSONAL PRODUCTIVITY FILES (NOT PROJECT DOCUMENTATION)
+# -----------------------------------------------------------------------------
+# Session logs and task lists (personal notes, not project docs)
+TASKS_*.md
+SESSION_LOG_*.md
+SESSION_SUMMARY_*.md
+SESSION_WORKPLAN_*.md
+NEXT_SESSION_*.md
+NEXT_SESSION_START.md
+NEXT_SESSION_QUICK_START.md
+*_WORKPLAN_*.md
+*_SUMMARY_*.md
+
+# Temporary notes and drafts
+notes/
+drafts/
+*.draft.md
+*.temp.md
+*.private.md
+
+# -----------------------------------------------------------------------------
 # ENVIRONMENT & SECRETS (CRITICAL - NEVER COMMIT)
 # -----------------------------------------------------------------------------
 .env

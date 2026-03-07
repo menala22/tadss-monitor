@@ -1,10 +1,28 @@
 # GitHub Actions Deployment Plan
 
-**Project:** TA-DSS - Trading Order Monitoring System  
-**Version:** 1.0  
-**Date:** March 4, 2026  
-**Status:** 🟢 Recommended Deployment Method  
-**Estimated Time:** 30-60 minutes  
+**Project:** TA-DSS - Trading Order Monitoring System
+**Version:** 1.1
+**Date:** March 4, 2026
+**Status:** 🟡 Known Limitation - Database Access
+**Estimated Time:** 30-60 minutes (for full 24/7 solution)
+
+---
+
+## ⚠️ Important Notice
+
+**Current Limitation (Discovered March 4, 2026):**
+
+GitHub Actions cannot access your local SQLite database (`data/positions.db`) because:
+- Database files are excluded from Git (`.gitignore`)
+- GitHub Actions runner has no access to your local files
+- Result: Workflow fails with `no such table: positions`
+
+**Solutions:**
+1. **Oracle Cloud VM** (Recommended) - Full 24/7 system, see `DEPLOYMENT_ORACLE_CLOUD_PLAN.md`
+2. **Cloud Database** - Migrate to Supabase/Neon PostgreSQL (Section 14.2)
+3. **Hybrid Backup** - GitHub Actions alerts when laptop is offline (Section 14.2)
+
+See **Section 14: Known Limitations & Solutions** for detailed options.
 
 ---
 
@@ -25,6 +43,8 @@
 | **[Contingency Plans](#11-contingency-plans-when-free-tier-is-exceeded)** | **What to do when limit exceeded** |
 | [Security](#12-security-best-practices) | Best practices |
 | [Next Steps](#13-next-steps) | Enhancements |
+| **[Known Limitations](#14-known-limitations--solutions)** | **Database access issue & solutions** |
+| [Troubleshooting Quick Reference](#15-troubleshooting-quick-reference) | Quick issue resolution |
 | [Appendices](#appendix-a-complete-file-templates) | Reference materials |
 
 ---
@@ -1369,16 +1389,175 @@ except Exception as e:
 | Web dashboard | View signals on web | Low |
 | Multiple strategies | Run different scan strategies | Medium |
 
-### 13.2 Monitoring Setup
+---
 
-```yaml
-# Add to workflow
-- name: Upload scan results
-  uses: actions/upload-artifact@v4
-  with:
-    name: scan-results-${{ github.run_number }}
-    path: results.json
+## 14. Known Limitations & Solutions
+
+### 14.1 Database Access Issue ⚠️
+
+**Problem Discovered:** March 4, 2026 - Phase 3 Testing
+
+**Error Log:**
 ```
+sqlite3.OperationalError: no such table: positions
+[SQL: SELECT positions.id AS positions_id, ... FROM positions WHERE positions.status = ?]
+```
+
+**Root Cause:**
+- SQLite database (`data/positions.db`) is excluded from Git via `.gitignore`
+- GitHub Actions runner has no access to local database
+- Workflow fails immediately when trying to query positions table
+
+**Why This Happens:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Your Laptop                          GitHub Actions Runner  │
+│ ┌─────────────────────────────────┐   ┌─────────────────┐  │
+│ │ data/positions.db               │   │ No database     │  │
+│ │ - 6 open positions              │   │ - Fresh checkout│  │
+│ │ - Signal history                │   │ - Code only     │  │
+│ └─────────────────────────────────┘   └─────────────────┘  │
+│         │                                     │             │
+│         └────────── Git Push ────────────────►│             │
+│              (code only, no .db files)        │             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 14.2 Solution Options
+
+#### Option A: Cloud Database (Recommended for 24/7) ⭐
+
+**Move database to cloud PostgreSQL:**
+
+| Provider | Free Tier | Setup Time |
+|----------|-----------|------------|
+| **Supabase** | 500 MB, unlimited reads | 10 min |
+| **Neon** | 500 MB, serverless | 5 min |
+| **Railway** | $5 credit/month | 10 min |
+
+**Steps:**
+1. Create free PostgreSQL database (e.g., Supabase)
+2. Get connection string: `postgresql://user:pass@host/db`
+3. Update `.env`: `DATABASE_URL=postgresql://...`
+4. Add to GitHub Secrets: `DATABASE_URL`
+5. Run migrations: `python -m src.database init`
+
+**Benefits:**
+- ✅ Both laptop and GitHub Actions access same database
+- ✅ True 24/7 monitoring without laptop
+- ✅ Automatic backups
+- ✅ Scalable
+
+**Trade-offs:**
+- ⚠️ Requires migration from SQLite to PostgreSQL
+- ⚠️ External dependency (cloud provider)
+
+---
+
+#### Option B: Free VM Deployment (Best for Full Control) 🖥️
+
+**Deploy entire system to free cloud VM:**
+
+| Provider | Free Tier | CPU/RAM | Setup |
+|----------|-----------|---------|-------|
+| **Oracle Cloud** | Always free | 4 OCPU, 24 GB | 30-60 min |
+| **Hugging Face Spaces** | Unlimited | 16 GB RAM | 15 min |
+| **Google Cloud Run** | 2M requests | Auto-scale | 20 min |
+
+**Steps (Oracle Cloud):**
+1. Create ARM VM (see `DEPLOYMENT_ORACLE_CLOUD_PLAN.md`)
+2. Deploy application with Docker
+3. Database lives on VM storage
+4. Scheduler runs 24/7 in cloud
+
+**Benefits:**
+- ✅ Complete 24/7 monitoring
+- ✅ No laptop required
+- ✅ Full control over environment
+- ✅ Database stays SQLite (no migration)
+
+**Trade-offs:**
+- ⚠️ More setup time (30-60 min)
+- ⚠️ VM management (updates, security)
+
+---
+
+#### Option C: Hybrid Backup Mode (Quick, Temporary) 🔧
+
+**Modify GitHub Actions to only alert on failures:**
+
+1. Script checks if database exists
+2. If no database → send "System Offline" alert
+3. If database exists → run normal checks
+
+**Modified Script Logic:**
+```python
+db_path = Path("data/positions.db")
+if not db_path.exists():
+    # Send "System Offline" alert
+    alerter.send_custom_message("⚠️ TA-DSS Offline Alert")
+    return 0
+```
+
+**Use Case:**
+- Local scheduler = primary (when laptop is on)
+- GitHub Actions = alerts you when laptop is off too long
+
+**Benefits:**
+- ✅ Quick to implement (5 min)
+- ✅ No cloud database needed
+- ✅ Alerts you to laptop downtime
+
+**Trade-offs:**
+- ❌ Doesn't solve 24/7 monitoring problem
+- ❌ Only notifies about the issue, doesn't fix it
+
+---
+
+### 14.3 Recommended Path Forward
+
+**For True 24/7 Monitoring (Laptop-Independent):**
+
+| Priority | Solution | Cost | Time | Guide |
+|----------|----------|------|------|-------|
+| **1st** | Oracle Cloud VM | $0 | 30-60 min | `DEPLOYMENT_ORACLE_CLOUD_PLAN.md` |
+| **2nd** | Supabase + GitHub Actions | $0 | 20 min | This doc (Section 14.2 Option A) |
+| **3rd** | Hugging Face Spaces | $0 | 15 min | `DEPLOYMENT_247_GUIDE.md` |
+
+**For Testing Only (Laptop Required):**
+- Use GitHub Actions as backup monitoring
+- Commit database temporarily (not recommended for production)
+- Accept limitation during development phase
+
+---
+
+### 14.4 Decision Matrix
+
+| Requirement | Best Solution |
+|-------------|---------------|
+| **24/7 monitoring, no laptop** | Oracle Cloud VM |
+| **Quick setup, cloud-native** | Supabase + GitHub Actions |
+| **Keep SQLite, full control** | Oracle Cloud VM |
+| **Testing only, temporary** | Hybrid Backup Mode |
+| **Zero cost, simple** | Hugging Face Spaces |
+
+---
+
+**Next Action:** Choose a solution from Section 14.2 and follow the corresponding guide.
+
+---
+
+## 15. Troubleshooting Quick Reference
+
+| Issue | Log Message | Solution |
+|-------|-------------|----------|
+| **Database missing** | `no such table: positions` | See Section 14 (Known Limitations) |
+| Telegram not configured | `Telegram not configured!` | Add secrets in GitHub Settings |
+| No alerts sent | `No significant change` | Expected (anti-spam logic working) |
+| Rate limit exceeded | `429 Too Many Requests` | Add `time.sleep(1)` between API calls |
+| Workflow timeout | `Job exceeded 6 hours` | Reduce positions or optimize queries |
 
 ---
 

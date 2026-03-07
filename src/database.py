@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.config import settings
 from src.models.position_model import Base
+from src.models.ohlcv_cache_model import OHLCVCache
 
 
 # =============================================================================
@@ -253,6 +254,12 @@ def initialize_database(verbose: bool = True) -> None:
         inspector = inspect(db_manager.engine)
         tables = inspector.get_table_names()
         print(f"✓ Tables: {', '.join(tables)}")
+        
+        # Ensure OHLCV cache table exists
+        from src.models.ohlcv_cache_model import create_ohlcv_cache_table
+        create_ohlcv_cache_table(db_manager.engine)
+        if verbose:
+            print("✓ OHLCV cache table ready")
 
 
 def reset_database(verbose: bool = True) -> None:
