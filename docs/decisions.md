@@ -1,5 +1,14 @@
 # Decision Log
-_Last updated: 2026-03-07_
+_Last updated: 2026-03-08_
+
+---
+
+## DEC-013: API key auth via router-level Depends(), not middleware
+- **Date**: 2026-03-08
+- **Decision**: Implement API key authentication using a FastAPI `Depends(verify_api_key)` on the router, not as global ASGI middleware.
+- **Alternatives considered**: ASGI middleware (apply to all routes including /health); per-endpoint Depends; reverse proxy (nginx) with auth.
+- **Rationale**: Router-level `dependencies=[]` applies to all 9 routes in the router with one line, while leaving `/health` and `/` public by design. Middleware would require explicit exclusion logic for /health. Per-endpoint would need 9 additions. nginx adds infrastructure overhead not warranted for a personal tool.
+- **Consequences**: `/health` and `/` remain unauthenticated (correct — health checks need no auth). Auth can be disabled for local dev by not setting `API_SECRET_KEY`. Key rotated by updating .env on VM + local machine.
 
 ---
 

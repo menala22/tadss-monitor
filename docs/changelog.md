@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - Phase 6: Security Hardening
+
+### Added — 2026-03-08 Security Audit
+- **API key authentication**: `src/api/auth.py` — `verify_api_key` dependency applied to all `/api/v1/positions/*` routes. 401 without key, `/health` stays public. Auth skips in dev mode (no key set). See DEC-013.
+- **Dashboard auth header**: `ui.py::get_api_headers()` sends `X-API-Key` on all API requests.
+
+### Changed — 2026-03-08 Security Audit
+- **sqlite-web startup**: added `-r` flag (read-only mode) — write queries now rejected at DB level, not just by discipline. Updated `docs/features/remote-db-access.md`.
+- **VM .env permissions**: fixed from `664` (world-readable) to `600` (owner-only) via `chmod 600`.
+
+### Security Audit Summary — 2026-03-08
+| Area | Status | Notes |
+|------|--------|-------|
+| API auth | Fixed | API key required for all /api/v1/* |
+| Firewall port 8000 | Open (Task 5) | 0.0.0.0/0 — lower priority now auth is in place |
+| SSH private key | Clean | 600 permissions, ~/.ssh/ is 700 |
+| Secrets in git | Clean | .env never committed; git grep found only code references |
+| Docker user | Root (low risk) | No extra caps; fix would require Dockerfile rebuild |
+| sqlite-web writes | Fixed | -r flag enforces read-only at DB level |
+| Disk encryption | Clean | GCP default encryption active |
+| Open ports | Note | RDP 3389 open (GCP default rule, no service listening on Linux VM) |
+
+---
+
 ## [Unreleased] - Phase 5: Deployment
 
 ### Fixed — 2026-03-07 Session

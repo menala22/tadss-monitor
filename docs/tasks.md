@@ -1,5 +1,5 @@
 # Task Tracker
-_Last updated: 2026-03-07_
+_Last updated: 2026-03-08_
 
 ---
 
@@ -11,18 +11,10 @@ _(none)_
 
 ## Backlog
 
-### Security (Critical)
-- [ ] **Comprehensive security audit** — NEXT SESSION
-  Full review of all attack surfaces: API auth, SSH key exposure, firewall, secrets, Docker, sqlite-web write risk, data at rest.
-  See [`docs/features/security-audit.md`](features/security-audit.md) for session plan.
-
-- [ ] **Task 4: Add API Key Authentication** — CRITICAL
-  Production API is open to the internet with no authentication. Anyone with the VM IP can read/modify positions.
-  Implementation: add `API_SECRET_KEY` to `.env`, FastAPI middleware on protected endpoints, dashboard sends key in headers.
-  See: `docs/archive/TASKS_2026-03-05.md` for full spec.
-
+### Security
 - [ ] **Task 5: Restrict Firewall to Your IP** — Medium
   Change GCP firewall `allow-tadss-api` source from `0.0.0.0/0` to your home IP (`/32`).
+  Now lower priority since API key auth is in place.
 
 ### Infrastructure
 - [ ] **Reserve Static IP for VM** — Medium
@@ -42,6 +34,10 @@ _(none)_
 
 ## Done
 
+- [x] **Comprehensive security audit** — completed 2026-03-08 (see devlog + security-audit.md)
+- [x] **Task 4: Add API Key Authentication** — completed 2026-03-08
+  `src/api/auth.py` + router-level `Depends()` + `X-API-Key` header in dashboard. Deployed and verified.
+- [x] **sqlite-web read-only mode** — completed 2026-03-08 (`-r` flag added to startup command)
 - [x] Core backend (FastAPI, SQLAlchemy, DataFetcher, TechnicalAnalyzer) — completed 2026-02-27
 - [x] Automated monitoring with Telegram alerts — completed 2026-02-28
 - [x] Streamlit dashboard skeleton — completed 2026-02-28

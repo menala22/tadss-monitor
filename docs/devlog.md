@@ -1,5 +1,11 @@
 # Dev Log
-_Last updated: 2026-03-07_
+_Last updated: 2026-03-08_
+
+---
+
+## 2026-03-08 — Security Audit
+Started: Comprehensive security audit (all 8 attack surfaces from security-audit.md).
+Done: API key auth implemented and deployed (401 without key, 200 with key, /health public). VM .env permissions fixed 664→600. sqlite-web startup updated to use -r flag (read-only enforced). Git history clean (no secrets). Disk encrypted (GCP default). Docker caps: none added. Firewall RDP rule present (GCP default, Linux VM, no service listening — low risk). Firewall port 8000 still open to 0.0.0.0/0 — Task 5 remains.
 
 ---
 
