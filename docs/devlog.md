@@ -9,7 +9,7 @@ Done: Fixed 3 bugs — double anti-spam gating blocked valid alerts, raw SignalS
 
 ---
 
-## 2026-03-08
+## 2026-03-07 (Session 1 — earlier)
 Started: Set up remote DB access to production SQLite on VM.
 Done: sqlite-web running on VM via SSH port forward — accessible at `http://localhost:8080` in browser. DB confirmed volume-mounted at `/home/aiagent/tadss-monitor/data/positions.db` (Scenario A — no docker cp needed). DBeaver dropped in favour of sqlite-web (DBeaver has no SSH tunnel tab for file-based SQLite). Two issues hit and resolved: `pip` not found (used `sudo apt install python3-pip`), `sqlite_web` not in PATH (run via `~/.local/bin/sqlite_web`).
 
