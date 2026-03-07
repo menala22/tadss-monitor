@@ -12,6 +12,10 @@ _(none)_
 ## Backlog
 
 ### Security (Critical)
+- [ ] **Comprehensive security audit** — NEXT SESSION
+  Full review of all attack surfaces: API auth, SSH key exposure, firewall, secrets, Docker, sqlite-web write risk, data at rest.
+  See [`docs/features/security-audit.md`](features/security-audit.md) for session plan.
+
 - [ ] **Task 4: Add API Key Authentication** — CRITICAL
   Production API is open to the internet with no authentication. Anyone with the VM IP can read/modify positions.
   Implementation: add `API_SECRET_KEY` to `.env`, FastAPI middleware on protected endpoints, dashboard sends key in headers.
