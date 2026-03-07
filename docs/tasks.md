@@ -70,3 +70,4 @@ _(none)_
 - [x] Add startup Telegram message on container start — completed 2026-03-07
 - [x] Add daily heartbeat message at 07:00 GMT+7 — completed 2026-03-07
 - [x] Remove GitHub Actions workflow (superseded by VM scheduler) — completed 2026-03-07
+- [x] Improve Telegram contradiction warning (graduated severity, OTT added, redundancy suppressed) — completed 2026-03-07

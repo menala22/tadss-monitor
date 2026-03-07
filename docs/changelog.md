@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Startup Telegram message**: fires when container starts — shows position count and next check time (`scheduler.py`)
 - **Daily heartbeat message**: fires at 00:00 UTC / 07:00 GMT+7 — confirms system is running (`scheduler.py`)
 
+### Changed — 2026-03-07 Session (2)
+- **Contradiction warning** in Telegram alert message (`notifier._format_message`):
+  - Graduated severity: 2/4 indicators `⚠️ Caution`, 3/4 `🔶 Warning`, 4/4 `🚨 Strong Warning` (was binary all-or-nothing)
+  - Now checks MA10, MA20, MA50, OTT (4 indicators, was MA10/MA20/MA50 only)
+  - Suppressed when reason is "Status changed" — avoids redundancy with the reason line
+  - See DEC-012
+
 ### Removed — 2026-03-07 Session
 - **GitHub Actions workflow** (`.github/workflows/monitor.yml`) and script (`scripts/github_monitor.py`): VM scheduler runs every hour and is more capable — GitHub Actions every-4-hour cron was redundant and causing duplicate Telegram messages. See DEC-011.
 

@@ -218,21 +218,38 @@ class TelegramNotifier:
             emoji = signal_emojis.get(status, "❓")
             signals_text += f"{emoji} `{key}: {status}`\n"
 
-        # Check for contradiction (position vs signals)
+        # Contradiction warning: MA10, MA20, MA50, OTT (4 key indicators)
+        # Skip if overall status already flipped — the reason line covers it
         contradiction_warning = ""
-        bullish_count = sum(
-            1 for s in [signals.get("MA10"), signals.get("MA20"), signals.get("MA50")]
-            if s in ["BULLISH", "OVERBOUGHT"]
-        )
+        if "Status changed" not in reason:
+            key_indicators = [
+                signals.get("MA10"),
+                signals.get("MA20"),
+                signals.get("MA50"),
+                signals.get("OTT"),
+            ]
 
-        if direction == "LONG" and bullish_count == 0:
-            contradiction_warning = (
-                "\n🚨 *WARNING:* All MAs BEARISH on LONG position!\n"
-            )
-        elif direction == "SHORT" and bullish_count == 3:
-            contradiction_warning = (
-                "\n🚨 *WARNING:* All MAs BULLISH on SHORT position!\n"
-            )
+            if direction == "LONG":
+                against_count = sum(
+                    1 for s in key_indicators if s in ["BEARISH", "OVERSOLD"]
+                )
+            else:  # SHORT
+                against_count = sum(
+                    1 for s in key_indicators if s in ["BULLISH", "OVERBOUGHT"]
+                )
+
+            if against_count == 2:
+                contradiction_warning = (
+                    f"\n⚠️ *Caution:* 2/4 key indicators against your {direction}\n"
+                )
+            elif against_count == 3:
+                contradiction_warning = (
+                    f"\n🔶 *Warning:* 3/4 key indicators against your {direction}\n"
+                )
+            elif against_count == 4:
+                contradiction_warning = (
+                    f"\n🚨 *Strong Warning:* All 4 key indicators against your {direction}\n"
+                )
 
         # Build message
         message = (

@@ -3,6 +3,12 @@ _Last updated: 2026-03-07_
 
 ---
 
+## 2026-03-07 (Session 3)
+Started: Improve Telegram alert contradiction warning.
+Done: Replaced binary all-or-nothing MA warning with graduated severity (2/4 ⚠️, 3/4 🔶, 4/4 🚨). Added OTT to the 4 key indicators checked (was only MA10/20/50). Warning now suppressed when reason is "Status changed" to avoid redundancy. Deployed to VM.
+
+---
+
 ## 2026-03-07 (Session 2)
 Started: Review and improve Telegram alert system.
 Done: Fixed 3 bugs — double anti-spam gating blocked valid alerts, raw SignalState enums passed to notifier (status comparison always wrong), OTT missing from alert message body. Added startup Telegram message on container start and daily heartbeat at 07:00 GMT+7. Removed GitHub Actions workflow (VM scheduler supersedes it). Pushed all changes to GitHub.

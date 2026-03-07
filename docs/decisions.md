@@ -3,6 +3,15 @@ _Last updated: 2026-03-07_
 
 ---
 
+## DEC-012: Graduated contradiction warning with 4 indicators
+- **Date**: 2026-03-07
+- **Decision**: Replace binary MA-only contradiction warning with 3-level graduated warning using MA10, MA20, MA50, OTT. Suppress when overall status already changed.
+- **Alternatives considered**: Keep binary warning; show contradicting indicator names explicitly.
+- **Rationale**: Binary (all-or-nothing on 3 MAs) was too rare to be useful and missed early turning signals. Graduated levels (2/4, 3/4, 4/4) act as an early warning before full status flip. OTT added because it's a trend indicator equally relevant to MAs. Suppression on "Status changed" avoids repeating information already in the reason line.
+- **Consequences**: Warning now fires more often (at 2/4 instead of 3/3) — gives earlier signal to review the position.
+
+---
+
 ## DEC-011: Remove GitHub Actions workflow — VM scheduler supersedes it
 - **Date**: 2026-03-07
 - **Decision**: Delete `.github/workflows/monitor.yml` and `scripts/github_monitor.py`.
