@@ -1,5 +1,14 @@
 # Decision Log
-_Last updated: 2026-03-07_
+_Last updated: 2026-03-08_
+
+---
+
+## DEC-010: sqlite-web over DBeaver for remote SQLite access
+- **Date**: 2026-03-08
+- **Decision**: Use sqlite-web (browser-based) via SSH port forward instead of DBeaver with SSH tunnel.
+- **Alternatives considered**: DBeaver (SSH tunnel tab), TablePlus, Beekeeper Studio, manual `scp` copy.
+- **Rationale**: DBeaver does not show an SSH tunnel tab for SQLite connections — SQLite is file-based with no server port, so DBeaver's tunnel feature doesn't apply. sqlite-web requires no local app install, runs on the VM, and is accessed securely through the existing SSH connection via port forwarding. Zero new attack surface.
+- **Consequences**: A terminal must stay open during each DB browsing session. sqlite-web query editor can run writes — treat it as read-only by discipline (avoid INSERT/UPDATE/DELETE).
 
 ---
 

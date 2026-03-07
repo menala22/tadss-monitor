@@ -1,6 +1,6 @@
-# Feature: DBeaver Remote Database Access
-_Status: Draft_
-_Last updated: 2026-03-07_
+# Feature: Remote Database Access (sqlite-web)
+_Status: Done_
+_Last updated: 2026-03-08_
 
 ---
 
@@ -205,3 +205,44 @@ Before starting, have these ready:
 | 7 | If Scenario B: delete DB copy from VM host after session | 1 min |
 
 **Total estimated time: 20–30 minutes**
+
+---
+
+## As Built
+_Added after implementation — 2026-03-08_
+
+### What Changed from Design
+
+**DBeaver was dropped entirely.** DBeaver does not show an SSH tunnel tab for SQLite connections — SQLite is file-based (no server port), so DBeaver's tunnel feature doesn't apply to it. Discovered mid-session.
+
+**Replaced with sqlite-web** — a lightweight browser-based SQLite viewer that runs directly on the VM. Access is via SSH port forwarding, which is equally secure.
+
+### Final Setup (How to Start Each Session)
+
+**Terminal — run once per session:**
+```bash
+gcloud compute ssh tadss-vm --zone us-central1-a -- -L 8080:localhost:8080
+```
+Then inside that SSH session on the VM:
+```bash
+~/.local/bin/sqlite_web /home/aiagent/tadss-monitor/data/positions.db --host 127.0.0.1 --port 8080 --no-browser
+```
+Leave the terminal open.
+
+**Browser:**
+```
+http://localhost:8080
+```
+
+### Known Limitations
+
+- sqlite-web is read-only by default for browsing, but the query editor can run writes — avoid `INSERT`, `UPDATE`, `DELETE` in the query tab
+- Data is live (reads directly from the volume-mounted DB)
+- The terminal running sqlite_web must stay open for the browser to work
+- VM IP may change on restart — update `.env` if gcloud SSH fails
+
+### Issues Hit During Build
+
+1. **`pip` not found** — Ubuntu didn't have pip installed. Fixed: `sudo apt install python3-pip -y`
+2. **`sqlite_web` command not found** — pip installs to `~/.local/bin` which isn't in PATH by default. Fixed: use full path `~/.local/bin/sqlite_web`
+3. **Wrong browser tab** — navigated to `localhost:8503` (Streamlit) instead of `localhost:8080`. Fixed: open correct URL

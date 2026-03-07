@@ -5,8 +5,7 @@ _Last updated: 2026-03-08_
 
 ## In Progress
 
-- [ ] **DBeaver remote DB access via SSH tunnel** — started 2026-03-08
-  See [`docs/features/dbeaver-connection.md`](features/dbeaver-connection.md) for full plan and session steps.
+_(none)_
 
 ---
 
@@ -27,7 +26,7 @@ _Last updated: 2026-03-08_
   Run: `gcloud compute addresses create tadss-static-ip --region=us-central1`
   See: `docs/archive/ISSUE_DASHBOARD_NO_DATA_2026-03-07.md` for full setup steps.
 
-- [ ] **Task 6: DBeaver SSH Tunnel** — moved to In Progress (2026-03-08)
+- [ ] **Task 6: DBeaver SSH Tunnel** — completed as sqlite-web (2026-03-08), see docs/features/dbeaver-connection.md
 
 ### UX
 - [ ] **Dashboard row click visual feedback** — Medium (30 min)
@@ -60,3 +59,4 @@ _Last updated: 2026-03-08_
 - [x] Fix missing schema fields (Health/Signal always NEUTRAL) — completed 2026-03-07
 - [x] Fix CCXT/Gate.io fetchers not saving to OHLCV cache — completed 2026-03-07
 - [x] Fix XAUUSD h4 cache key mismatch (save under original timeframe) — completed 2026-03-07
+- [x] Remote DB access via sqlite-web + SSH tunnel — completed 2026-03-08
