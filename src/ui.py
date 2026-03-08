@@ -31,6 +31,8 @@ from src.database import get_db_context
 from src.models.position_model import Position, PositionStatus, PositionType
 from src.services.technical_analyzer import TechnicalAnalyzer
 from src.data_fetcher import DataFetcher
+from src.ui_mtf_scanner import render_mtf_scanner_page
+from src.ui_market_data import display_market_data_page
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -697,7 +699,7 @@ def render_sidebar() -> str:
         # Navigation options
         page = st.radio(
             "Select Page",
-            ["📋 Open Positions", "➕ Add New Position", "⚙️ Settings"],
+            ["📋 Open Positions", "➕ Add New Position", "🔍 MTF Scanner", "📈 Market Data", "⚙️ Settings"],
             index=0,
             label_visibility="collapsed",
         )
@@ -2379,6 +2381,10 @@ def main():
         render_main_page()
     elif page == "➕ Add New Position":
         render_add_position_page()
+    elif page == "🔍 MTF Scanner":
+        render_mtf_scanner_page()
+    elif page == "📈 Market Data":
+        display_market_data_page()
     elif page == "⚙️ Settings":
         render_settings_page()
 

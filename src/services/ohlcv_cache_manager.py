@@ -4,24 +4,35 @@ OHLCV Cache Manager for TA-DSS.
 This module provides caching functionality for OHLCV data to reduce API calls.
 It implements incremental fetch - only fetching new candles that aren't cached.
 
+Multi-Timeframe Support:
+    - Cache multiple timeframes per symbol
+    - Batch fetch for MTF analysis (3 TFs × N symbols)
+    - Automatic cache invalidation
+
 Usage:
     from src.services.ohlcv_cache_manager import OHLCVCacheManager
-    
+
     cache_mgr = OHLCVCacheManager(db_session)
-    
+
     # Get cached data (returns None if not enough data)
     df = cache_mgr.get_cached_ohlcv('XAUUSD', 'd1', limit=100)
-    
+
+    # Multi-timeframe fetch for MTF analysis
+    data = cache_mgr.get_multi_timeframe_ohlcv(
+        'BTC/USDT',
+        timeframes=['w1', 'd1', 'h4']
+    )
+
     # Save new candles to cache
     cache_mgr.save_ohlcv('XAUUSD', 'd1', new_candles_df)
-    
+
     # Get last cached candle timestamp
     last_ts = cache_mgr.get_last_cached_timestamp('XAUUSD', 'd1')
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -337,11 +348,185 @@ class OHLCVCacheManager:
             
             count = query.delete()
             self.db.commit()
-            
+
             logger.info(f"Cleared {count} cache entries")
             return count
-            
+
         except Exception as e:
             logger.error(f"Error clearing cache: {e}")
             self.db.rollback()
             return 0
+
+    # ========================================================================
+    # MULTI-TIMEFRAME SUPPORT (for MTF Analysis)
+    # ========================================================================
+
+    def get_multi_timeframe_ohlcv(
+        self,
+        symbol: str,
+        timeframes: list[str],
+        limit: int = 100,
+    ) -> dict[str, Optional[pd.DataFrame]]:
+        """
+        Get cached OHLCV data for multiple timeframes.
+
+        Used by MTF analysis to fetch data for 3 timeframes simultaneously.
+
+        Args:
+            symbol: Trading pair symbol.
+            timeframes: List of timeframes (e.g., ['w1', 'd1', 'h4']).
+            limit: Number of candles per timeframe.
+
+        Returns:
+            Dictionary of timeframe → DataFrame.
+
+        Example:
+            >>> data = cache_mgr.get_multi_timeframe_ohlcv(
+            ...     'BTC/USDT', ['w1', 'd1', 'h4']
+            ... )
+            >>> htf_df = data['w1']  # Weekly
+            >>> mtf_df = data['d1']  # Daily
+            >>> ltf_df = data['h4']  # 4H
+        """
+        result = {}
+
+        for tf in timeframes:
+            df = self.get_cached_ohlcv(symbol, tf, limit=limit)
+            result[tf] = df
+
+        return result
+
+    def get_cache_status(
+        self,
+        symbol: str,
+        timeframes: list[str],
+    ) -> dict[str, Any]:
+        """
+        Get cache status for multiple timeframes.
+
+        Returns information about what's cached and what needs to be fetched.
+
+        Args:
+            symbol: Trading pair symbol.
+            timeframes: List of timeframes.
+
+        Returns:
+            Dictionary with cache status for each timeframe.
+        """
+        status = {}
+
+        for tf in timeframes:
+            last_ts = self.get_last_cached_timestamp(symbol, tf)
+            candle_count = self._get_cached_candle_count(symbol, tf)
+
+            status[tf] = {
+                "last_update": last_ts.isoformat() if last_ts else None,
+                "candle_count": candle_count,
+                "is_fresh": self._is_cache_fresh(last_ts, tf),
+            }
+
+        return status
+
+    def _get_cached_candle_count(
+        self,
+        symbol: str,
+        timeframe: str,
+    ) -> int:
+        """
+        Get number of cached candles for a symbol/timeframe.
+
+        Args:
+            symbol: Trading pair symbol.
+            timeframe: Timeframe.
+
+        Returns:
+            Number of cached candles.
+        """
+        try:
+            timeframe_normalized = self._normalize_timeframe_for_cache(timeframe)
+
+            count = (
+                self.db.query(OHLCVCache)
+                .filter(
+                    OHLCVCache.symbol == symbol,
+                    OHLCVCache.timeframe == timeframe_normalized,
+                )
+                .count()
+            )
+
+            return count
+
+        except Exception as e:
+            logger.error(f"Error getting candle count: {e}")
+            return 0
+
+    def _is_cache_fresh(
+        self,
+        last_update: Optional[datetime],
+        timeframe: str,
+    ) -> bool:
+        """
+        Check if cache is fresh enough for the timeframe.
+
+        Args:
+            last_update: Last update timestamp.
+            timeframe: Timeframe.
+
+        Returns:
+            True if cache is fresh.
+        """
+        if last_update is None:
+            return False
+
+        # Define max age per timeframe
+        max_age_hours = {
+            "m1": 0.5,    # 30 minutes
+            "m5": 1,      # 1 hour
+            "m15": 2,     # 2 hours
+            "m30": 4,     # 4 hours
+            "h1": 4,      # 4 hours
+            "h4": 12,     # 12 hours
+            "d1": 48,     # 2 days
+            "w1": 168,    # 1 week
+            "M1": 720,    # 1 month
+        }
+
+        max_age = max_age_hours.get(timeframe, 24)
+        age_hours = (datetime.utcnow() - last_update).total_seconds() / 3600
+
+        return age_hours < max_age
+
+    def batch_save_ohlcv(
+        self,
+        data: dict[str, dict[str, pd.DataFrame]],
+    ) -> dict[str, int]:
+        """
+        Batch save OHLCV data for multiple symbols and timeframes.
+
+        Optimized for MTF scanner that fetches 3 TFs × N symbols.
+
+        Args:
+            data: Nested dict {symbol: {timeframe: DataFrame}}.
+
+        Returns:
+            Dictionary of saved candle counts.
+
+        Example:
+            >>> data = {
+            ...     "BTC/USDT": {
+            ...         "w1": weekly_df,
+            ...         "d1": daily_df,
+            ...         "h4": hourly_df,
+            ...     }
+            ... }
+            >>> result = cache_mgr.batch_save_ohlcv(data)
+        """
+        result = {}
+
+        for symbol, timeframes in data.items():
+            result[symbol] = {}
+            for timeframe, df in timeframes.items():
+                count = self.save_ohlcv(symbol, timeframe, df)
+                result[symbol][timeframe] = count
+
+        return result

@@ -1,4 +1,5 @@
 # Changelog
+_Last updated: 2026-03-08_
 
 All notable changes to the TA-DSS project are documented in this file.
 
@@ -7,17 +8,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - MTF Scanner dashboard fixes — 2026-03-08
+
+### Fixed
+- **BUG-021** `ui_mtf_scanner.py` `_get_api_base_url()` had no `.env` file fallback — fell back to `localhost:8000` if `API_BASE_URL` not explicitly set in shell; dashboard showed "Cannot connect to API" on every scan.
+- **BUG-022** "Scan Anyway" button was silently unreachable — Streamlit only processes a button click on the run where the button is *rendered*; because it was gated by `scan_button`, on the rerun triggered by clicking "Scan Anyway" (where `scan_button=False`) the button was never evaluated and the click was lost.
+- **BUG-023** `check_status=True` hardcoded in scan request — even if scan fired, pairs with quality "MISSING" were excluded from `ready_pairs` server-side, guaranteeing zero results for newly-added pairs.
+
+### Changed
+- **MTF Scanner scan flow** simplified: removed stale-data pre-check and "Scan Anyway" / "Refresh All Stale" intermediate step. "Scan Now" fires immediately with `check_status=False`. Server handles missing data gracefully (pairs with no `ohlcv_universal` rows are skipped; result summary shows `pairs_no_data` count). See DEC-023.
+
+---
+
+## [Unreleased] - Phase 9: Internal Market Database
+
+### Added — 2026-03-08 (Phase 6)
+- **Position Monitor Migration**: Updated `src/monitor.py` to read from `ohlcv_universal` (read-only) with API fallback. Position checks now <100ms (was 2-5s), zero API calls per check.
+
+### Changed — 2026-03-08 (Phase 8)
+- **Scheduler Cleanup**: Removed redundant `mtf_cache_prefetch` job (ran every 2h at :20). Now only `market_data_prefetch` runs every hour at :10. Scheduler jobs reduced from 4 → 3.
+- **Removed unused method**: `_run_mtf_prefetch()` removed from `src/scheduler.py`.
+
+### Migration Progress
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1-5 | ✅ Complete | Core architecture |
+| Phase 6 | ✅ Complete | Position monitor migrated |
+| Phase 7 | ⏸️ Backlog | Dashboard charts (low priority) |
+| Phase 8 | ✅ Complete | Scheduler cleanup |
+| Phase 9 | ⏳ Pending | ohlcv_cache cleanup (after 7-14 days) |
+
+### Added — 2026-03-08
+- **OHLCV Universal Table** (`src/models/ohlcv_universal_model.py`): Single source of truth for all market data with standardized symbol formats (XAU/USD) and normalized timeframes (w1, d1, h4).
+- **MarketDataOrchestrator** (`src/services/market_data_orchestrator.py`): Smart fetch service with staleness detection, provider routing (CCXT/Twelve Data/Gate.io), and data validation.
+- **Scheduler Integration**: Prefetch job runs every hour at :10 to keep ohlcv_universal fresh.
+- **Manual Prefetch API** (`src/api/routes_market_data_prefetch.py`): POST /api/v1/market-data/prefetch endpoint for on-demand refresh.
+- **Migration Script** (`scripts/migrate_ohlcv_to_universal.py`): Migrates 2,084 candles from ohlcv_cache with normalization and deduplication.
+- **Test Scripts** (`scripts/phase5_test_verify.py`, `scripts/phase5_cleanup_cache.py`): Comprehensive testing and safe cleanup tools.
+
+### Changed — 2026-03-08
+- **MTF Scanner Migration**: Now reads exclusively from ohlcv_universal (read-only, zero live API calls).
+- **Scheduler Jobs**: Added market_data_prefetch at :10 alongside position_monitoring.
+- **Data Normalization**: Timeframe formats standardized (1w/1week/1wk → w1, 1d → d1, 4h → h4).
+
+### Fixed — 2026-03-08
+- **Duplicate Timeframes**: Eliminated 3× storage waste from 1w/1week/1wk variations.
+- **Symbol Format Inconsistency**: Standardized XAUUSD/XAU/USD → XAU/USD.
+- **Data Quality**: 0 NULL values, 0 duplicate candles in ohlcv_universal.
+
+---
+
+## [Unreleased] - Phase 8: Market Data Caching + MTF Integration
+
+### Added — 2026-03-08
+- **Market Data Status Dashboard** (`src/ui_market_data.py`): new dashboard page showing data quality for all pairs with timeframe breakdown, refresh controls, and MTF readiness indicators.
+- **Market Data Service** (`src/services/market_data_service.py`): service layer for tracking data quality (EXCELLENT/GOOD/STALE/MISSING), syncing with OHLCV cache, identifying stale pairs, and determining MTF readiness.
+- **Market Data Status Model** (`src/models/market_data_status_model.py`): SQLite table tracking candle count, last update time, quality assessment, and data source per pair/timeframe.
+- **Market Data API** (`src/api/routes_market_data.py`): 6 REST endpoints — `GET /status`, `GET /status/{pair}`, `GET /summary`, `POST /refresh`, `POST /refresh-all`, `GET /watchlist`.
+- **Timeframe normalization**: `_normalize_timeframe()` and `_merge_timeframe_data()` functions handle variations from different APIs (1week/1w/w1 → w1).
+- **MTF scanner pre-scan check**: checks data status before scanning, warns user if stale, offers one-click refresh.
+- **Test suite**: 68 tests covering model (32), service (23), and routes (13).
+
+### Changed — 2026-03-08
+- **MTF scanner integration**: now checks `market_data_status` before scanning, returns `data_issues` array with actionable errors.
+- **Dashboard UI**: "📈 Market Data" page added to navigation with table/cards/details views and refresh controls.
+- **Quality assessment logic**: 4-tier system (EXCELLENT: 200+ candles, GOOD: 100+, STALE: 50-99, MISSING: <50) with timeframe-relative age thresholds.
+
+### Fixed — 2026-03-08
+- **Duplicate timeframe entries**: cleaned up old formats (1w, 1week, 1d, 1h, 4h) that duplicated normalized formats (w1, d1, h4, h1).
+- **Wrong quality assessments**: 250 candles incorrectly marked as MISSING — now correctly shows EXCELLENT/GOOD based on merged data.
+- **Empty source field**: now shows "N/A" instead of blank when source is null (synced from cache doesn't track source).
+- **Details view not showing data**: fixed to use already-fetched data instead of trying to re-fetch from non-existent API endpoint.
+
+---
+
+## [Unreleased] - Phase 8: MTF Wiring + Cache-First Architecture
+
+### Added — 2026-03-08
+- **MTF Cache Prefetcher** (`src/services/mtf_cache_prefetcher.py`): background job that pre-populates OHLCV cache for all watchlist pairs × SWING + INTRADAY timeframes; skips fresh data, fetches only when stale (see DEC-016).
+- **MTF Prefetch Scheduler Job**: runs every 2 hours at :20 via APScheduler (3rd job alongside position monitoring at :10 and daily heartbeat). `job_count` updated to 3.
+- **MTF Persistent Watchlist**: `mtf_watchlist` SQLite table + `MTFWatchlistItem` model; auto-seeds defaults (BTC/USDT, ETH/USDT, XAU/USD, XAG/USD); GET / POST / DELETE CRUD endpoints in `routes_mtf.py`; watchlist management panel in `ui_mtf_scanner.py`.
+
+### Changed — 2026-03-08
+- **MTF scan route — cache-only**: `_load_pair_data()` no longer does live API fetches on cache miss; returns "no data" instead. Removes 30-60s blocking requests from dashboard. See DEC-017.
+- **MTF scan route — freshness check removed**: scan trusts cache content; prefetcher handles staleness. Fixes false-no-data on weekends for gold (market closed → last candle looks "stale" by h4 threshold even though no newer data exists).
+- **MTF routes — API key auth**: all 5 MTF endpoints now require `X-API-Key` header (same as positions routes).
+- **MTF alignment scorer**: TargetCalculator wired in (Step 5 in `analyze_pair()`); real R:R ratio replaces 2.5× placeholder for scored BUY/SELL setups.
+- **MTF scan endpoints**: `send_mtf_opportunity_alert` called for score=3 opportunities in both `scan_opportunities` and `trigger_mtf_scan`.
+- **DataFetcher — CCXT lazy init**: `_fetch_ccxt()` no longer raises `RuntimeError` when `_exchange` is None; initializes exchange on first call.
+- **HTF bias — minimum candle requirement**: lowered from 200 (`sma200_period`) to 50 (`sma50_period`); NaN-safe SMA-200 (returns AT/neutral when insufficient history instead of BELOW/bearish).
+- **MTF dashboard auth**: `_get_api_headers()` in `ui_mtf_scanner.py` reads `.env` file directly as fallback (matches `ui.py` pattern).
+
+### Fixed — 2026-03-08
+- RSI division by zero in `divergence_detector.py`, `mtf_setup_detector.py`, `mtf_entry_finder.py` (BUG-020): `rs = gain / loss.replace(0, nan)` + `rsi.fillna(100)`.
+- MTF watchlist 404 — all MTF files deployed to VM (BUG-016).
+- MTF dashboard 401 — API key not being sent (BUG-019).
+- CCXT uninitialized for BTC/USDT, ETH/USDT in MTF scan (BUG-018).
+- HTF NEUTRAL on all weekly data due to 200-candle minimum (BUG-017).
+
+---
+
+## [Unreleased] - Phase 7: MTF Scanner
+
+### Added — 2026-03-07 MTF Feature (6 sessions)
+- **Multi-Timeframe Opportunity Scanner**: scans multiple pairs across 3 timeframes simultaneously (HTF → MTF → LTF), scores alignment 0-3, filters by R:R, surfaces entry/stop/target.
+- **HTF Bias Detector** (`mtf_bias_detector.py`): price structure (HH/HL, LH/LL) + 50/200 SMA. Structural tools only — no oscillators on HTF.
+- **MTF Setup Detector** (`mtf_setup_detector.py`): pullback to SMA20/50, RSI divergence, breakout, consolidation detection.
+- **LTF Entry Finder** (`mtf_entry_finder.py`): candlestick patterns (engulfing, hammer, pinbar), EMA20 reclaim, RSI turn from key levels, stop loss calculation.
+- **Alignment Scorer** (`mtf_alignment_scorer.py`): 0-3 score; HIGHEST/GOOD/POOR/AVOID quality; BUY/SELL/WAIT/AVOID recommendation.
+- **Divergence Detector** (`divergence_detector.py`): 4 RSI divergence types (regular/hidden bullish/bearish).
+- **Target Calculator** (`target_calculator.py`): 5 methods — next HTF S/R, measured move, Fibonacci extension (1.272/1.618/2.618), ATR-based, prior swing.
+- **S/R Detector** (`support_resistance_detector.py`): swing, volume, round number, and converging cross-TF levels.
+- **Opportunity Scanner** (`mtf_opportunity_scanner.py`): multi-pair scan with pattern matching, min alignment + min R:R filters, ranked results.
+- **MTF API** (`routes_mtf.py`): 5 REST endpoints — `GET /api/v1/mtf/opportunities`, `GET /api/v1/mtf/opportunities/{pair}`, `GET /api/v1/mtf/configs`, `POST /api/v1/mtf/scan`, `GET /api/v1/mtf/watchlist`.
+- **MTF Dashboard panel** (`ui_mtf_scanner.py`): trading style selector, alignment/R:R filters, scan results with expandable cards, detailed breakdown.
+- **MTF Telegram alerts** (`mtf_notifier.py`): opportunity alert (3/3 alignment only), divergence alert, daily summary; throttled to max 3/day.
+- **Gate.io integration** for XAGUSD/XAUUSD via swap contracts (added to `data_fetcher.py`).
+- **OHLCV cache** extended for multi-timeframe support (`ohlcv_cache_manager.py`).
+- **149 unit tests** across 6 test files in `tests/test_mtf/`.
+- **Report generator** (`scripts/generate_mtf_report.py`): CLI tool for real-time MTF analysis reports saved to `docs/reports/`.
+
+See [`docs/features/multi-timeframe-scanner.md`](docs/features/multi-timeframe-scanner.md) for full design + as-built notes.
+See [`docs/features/mtf-user-guide.md`](docs/features/mtf-user-guide.md) for user-facing guide.
+
+---
+
 ## [Unreleased] - Phase 6: Security Hardening
 
-### Added — 2026-03-08 Security Audit
+### Added — 2026-03-07 Security Audit
 - **API key authentication**: `src/api/auth.py` — `verify_api_key` dependency applied to all `/api/v1/positions/*` routes. 401 without key, `/health` stays public. Auth skips in dev mode (no key set). See DEC-013.
 - **Dashboard auth header**: `ui.py::get_api_headers()` sends `X-API-Key` on all API requests.
 
-### Changed — 2026-03-08 Security Audit
+### Changed — 2026-03-07 Security Audit
 - **sqlite-web startup**: added `-r` flag (read-only mode) — write queries now rejected at DB level, not just by discipline. Updated `docs/features/remote-db-access.md`.
 - **VM .env permissions**: fixed from `664` (world-readable) to `600` (owner-only) via `chmod 600`.
 
-### Security Audit Summary — 2026-03-08
+### Security Audit Summary — 2026-03-07
 | Area | Status | Notes |
 |------|--------|-------|
 | API auth | Fixed | API key required for all /api/v1/* |

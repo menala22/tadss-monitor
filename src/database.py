@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.config import settings
 from src.models.position_model import Base
 from src.models.ohlcv_cache_model import OHLCVCache
+from src.models.market_data_status_model import MarketDataStatus
+from src.models.ohlcv_universal_model import OHLCVUniversal
 
 
 # =============================================================================
@@ -260,6 +262,24 @@ def initialize_database(verbose: bool = True) -> None:
         create_ohlcv_cache_table(db_manager.engine)
         if verbose:
             print("✓ OHLCV cache table ready")
+
+        # Ensure MTF watchlist table exists
+        from src.models.mtf_watchlist_model import create_mtf_watchlist_table
+        create_mtf_watchlist_table(db_manager.engine)
+        if verbose:
+            print("✓ MTF watchlist table ready")
+
+        # Ensure market data status table exists
+        from src.models.market_data_status_model import create_market_data_status_table
+        create_market_data_status_table(db_manager.engine)
+        if verbose:
+            print("✓ Market data status table ready")
+
+        # Ensure OHLCV universal table exists
+        from src.models.ohlcv_universal_model import create_ohlcv_universal_table
+        create_ohlcv_universal_table(db_manager.engine)
+        if verbose:
+            print("✓ OHLCV universal table ready")
 
 
 def reset_database(verbose: bool = True) -> None:

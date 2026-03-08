@@ -3,8 +3,107 @@ _Last updated: 2026-03-08_
 
 ---
 
-## DEC-013: API key auth via router-level Depends(), not middleware
+## DEC-023: Remove stale-data pre-check from MTF Scanner — scan directly
 - **Date**: 2026-03-08
+- **Decision**: Remove the "check data status before scanning" step from the MTF Scanner UI. "Scan Now" fires the `/mtf/opportunities` API call immediately with `check_status=False`.
+- **Alternatives considered**: Fix the Streamlit state-machine so "Scan Anyway" works correctly (attempted twice, introduced bugs each time); keep the pre-check but restructure as a proper state machine.
+- **Rationale**: The pre-check added two extra round-trips and three possible failure modes, all to show a warning the user had to dismiss anyway. The API already handles missing data gracefully — pairs with no `ohlcv_universal` rows are skipped, and the `pairs_no_data` count in the response gives visibility. The user can always check the Market Data page for freshness. Simpler is safer.
+- **Consequences**: Users see no stale-data warning before scanning. If data is missing for a pair, it just doesn't appear in results (and `pairs_no_data` tells them). The Market Data page is the right place to manage data quality — the scanner should just scan.
+
+---
+
+## DEC-021: Single ohlcv_universal table as source of truth
+- **Date**: 2026-03-08
+- **Decision**: Create new ohlcv_universal table as single source of truth for all market data, replacing scattered ohlcv_cache reads.
+- **Alternatives considered**: Modify ohlcv_cache in-place; keep both tables indefinitely; migrate to PostgreSQL immediately.
+- **Rationale**: ohlcv_cache has design issues (mixed timeframe formats, duplicate symbols, no provider tracking). New table allows clean schema, normalized data, and safe migration with rollback. PostgreSQL can wait until 10M+ rows.
+- **Consequences**: Requires migration script and consumer updates. Enables clean architecture with read-only consumers and centralized orchestrator.
+
+---
+
+## DEC-022: Hourly prefetch at :10 for market data freshness
+- **Date**: 2026-03-08
+- **Decision**: Run MarketDataOrchestrator smart fetch every hour at :10 (same time as position monitoring).
+- **Alternatives considered**: Every 2 hours at :20 (like MTF prefetch); separate time slot at :15 or :05; on-demand only.
+- **Rationale**: Hourly ensures intraday timeframes (h4, h1) stay fresh. Same time as position monitoring reduces API call fragmentation. Smart fetch skips fresh data, minimizing actual API calls.
+- **Consequences**: May cause API rate limiting if many symbols need refresh simultaneously. Monitor and adjust to :15 if issues arise.
+
+---
+
+## DEC-023: MTF scanner migration before position monitor
+- **Date**: 2026-03-08
+- **Decision**: Migrate MTF scanner to ohlcv_universal first, keep position monitor on ohlcv_cache temporarily.
+- **Alternatives considered**: Migrate both simultaneously; migrate position monitor first.
+- **Rationale**: MTF scanner is more complex (3 timeframes per pair) and benefits more from normalized data. Position monitor uses single timeframe per position—simpler to migrate later. Phased approach reduces risk.
+- **Consequences**: Temporary dual-system (some consumers read ohlcv_cache, others read ohlcv_universal). Both tables kept in sync by orchestrator until full migration complete.
+
+---
+
+## DEC-020: Timeframe normalization with duplicate merging
+- **Date**: 2026-03-08
+- **Decision**: Normalize all timeframe strings to standard format (`w1`, `d1`, `h4`) and merge duplicate entries by keeping the best (highest candle count, best quality, newest fetched_at). UI uses `_merge_timeframe_data()` to handle any remaining duplicates.
+- **Alternatives considered**: Store exact API format (creates duplicates); store multiple formats (complex); delete old formats entirely (risk of data loss).
+- **Rationale**: Different APIs use different formats (Twelve Data: `1week`, CCXT: `1w`, internal: `w1`). Duplicates cause confusion (same data appears 3× with different quality ratings). Merging ensures UI shows best available data regardless of format.
+- **Consequences**: Old format entries (`1w`, `1week`, `1d`, etc.) cleaned from database. UI handles transition gracefully. Future syncs should use normalized formats only.
+
+---
+
+## DEC-019: Quality-based data assessment with timeframe-relative thresholds
+- **Date**: 2026-03-08
+- **Decision**: Use 4-tier quality system (EXCELLENT, GOOD, STALE, MISSING) with thresholds based on candle count AND age relative to timeframe interval (e.g., d1 EXCELLENT = 200+ candles AND <48h old).
+- **Alternatives considered**: Binary fresh/stale; absolute age thresholds (e.g., always 24h); candle count only.
+- **Rationale**: Binary is insufficient — need to distinguish "perfect for HTF analysis" from "barely usable". Timeframe-relative age makes sense: 12h is stale for h4 but fresh for d1. EXCELLENT tier (200+ candles) required for full HTF 50/200 SMA analysis.
+- **Consequences**: MTF readiness check uses quality thresholds. Dashboard shows visual badges (🟢🟡🔴). Prefetch job prioritizes STALE/MISSING pairs.
+
+---
+
+## DEC-018: Cache-first architecture for MTF scanner
+- **Date**: 2026-03-08
+- **Decision**: MTF scanner reads ONLY from cache, never makes live API calls during scan. User must explicitly refresh to populate cache. Prefetch job runs every 2h to keep cache fresh.
+- **Alternatives considered**: Live fetch on cache miss (original); hybrid (fetch if stale); automatic refresh on staleness.
+- **Rationale**: Scans should be instant (<1s). API calls are costly (Twelve Data: 800/day limit). Blocking scan on live fetch creates poor UX (30-60s wait). User-triggered refresh provides control and visibility.
+- **Consequences**: Scan returns "no data" if cache empty — user must refresh. Requires separate refresh UI/UX. Prefetch job becomes critical infrastructure. 80% reduction in API usage.
+
+---
+
+## DEC-017: MTF scan route is cache-only — no live API calls from dashboard
+- **Date**: 2026-03-08
+- **Decision**: `_load_pair_data()` in `routes_mtf.py` reads from SQLite OHLCV cache only. If a timeframe has fewer than 10 candles, the pair is skipped with a "no data" message. The freshness check was removed — the scan trusts whatever is in the cache.
+- **Alternatives considered**: Keep live-fetch fallback on cache miss; check freshness and return 503 if stale.
+- **Rationale**: Live fetches block the request for 30-60s and hit rate limits. Freshness checks caused false negatives on weekends (gold closes Friday; h4 cache looks "stale" after 12h but no newer data exists). The prefetcher job handles keeping data fresh — the scan route should not duplicate that logic. Mirrors the positions architecture (DEC-011).
+- **Consequences**: First scan after deploy will return "no data" for pairs not yet in cache. Prefetch job seeds the cache within 2h. Manual prefetch possible via VM exec.
+
+---
+
+## DEC-016: MTF cache prefetcher as a scheduled background job
+- **Date**: 2026-03-08
+- **Decision**: New `src/services/mtf_cache_prefetcher.py` job pre-populates OHLCV cache for all watchlist pairs × SWING + INTRADAY timeframes. Runs as APScheduler cron every 2 hours at :20 (10 minutes after position monitoring at :10, to avoid API concurrency).
+- **Alternatives considered**: Trigger prefetch on first scan miss (lazy); run prefetch hourly; run per-style on demand.
+- **Rationale**: Separates concerns cleanly: background job owns data freshness, scan route owns analysis. 2h cadence is well within freshness windows (h4=12h, d1=48h, w1=168h). Running at :20 avoids collision with the positions monitoring job at :10.
+- **Consequences**: Scan always completes in <5s (no API calls). Cache may lag by up to 2h on a fresh VM restart. USDCAD and other invalid symbols will log prefetch errors and produce no-data on scan — acceptable.
+
+---
+
+## DEC-015: MTF scanner is stateless — no scan results persisted to DB
+- **Date**: 2026-03-07
+- **Decision**: MTF opportunity scans run fresh on every API call / dashboard trigger. Results are not saved to the database.
+- **Alternatives considered**: Cache scan results in a new `mtf_scans` table; cache in Redis; cache in memory with TTL.
+- **Rationale**: Scan results are only meaningful at the moment of generation — market conditions change every candle. Persisting them creates stale-data risk. The OHLCV cache (already in DB) handles data freshness. Adding a results table would add DB schema complexity for no user benefit in this use case.
+- **Consequences**: Every scan hits the analysis pipeline. Acceptable latency for a personal tool with a small watchlist (5-10 pairs).
+
+---
+
+## DEC-014: HTF bias uses structural tools only — no oscillators
+- **Date**: 2026-03-07
+- **Decision**: HTF bias detection uses price structure (HH/HL, LH/LL sequences) and 50/200 SMA only. RSI and MACD are not used on the HTF.
+- **Alternatives considered**: Include RSI divergence on HTF as a bias signal.
+- **Rationale**: Oscillators on high timeframes (weekly, monthly) lag price by so many candles they add noise rather than signal. Price structure and trend-aligned MAs are sufficient and more reliable at that scale. This principle comes from the MTF strategy research in `docs/archive/research/multi_timeframe.md`.
+- **Consequences**: HTF analysis requires 200+ candles for full SMA-200 calculation. With Gate.io/CCXT free tiers returning ~50-100 candles, HTF may return NEUTRAL bias when data is insufficient — a known limitation.
+
+---
+
+## DEC-013: API key auth via router-level Depends(), not middleware
+- **Date**: 2026-03-07
 - **Decision**: Implement API key authentication using a FastAPI `Depends(verify_api_key)` on the router, not as global ASGI middleware.
 - **Alternatives considered**: ASGI middleware (apply to all routes including /health); per-endpoint Depends; reverse proxy (nginx) with auth.
 - **Rationale**: Router-level `dependencies=[]` applies to all 9 routes in the router with one line, while leaving `/health` and `/` public by design. Middleware would require explicit exclusion logic for /health. Per-endpoint would need 9 additions. nginx adds infrastructure overhead not warranted for a personal tool.
@@ -31,7 +130,7 @@ _Last updated: 2026-03-08_
 ---
 
 ## DEC-010: sqlite-web over DBeaver for remote SQLite access
-- **Date**: 2026-03-08
+- **Date**: 2026-03-07
 - **Decision**: Use sqlite-web (browser-based) via SSH port forward instead of DBeaver with SSH tunnel.
 - **Alternatives considered**: DBeaver (SSH tunnel tab), TablePlus, Beekeeper Studio, manual `scp` copy.
 - **Rationale**: DBeaver does not show an SSH tunnel tab for SQLite connections — SQLite is file-based with no server port, so DBeaver's tunnel feature doesn't apply. sqlite-web requires no local app install, runs on the VM, and is accessed securely through the existing SSH connection via port forwarding. Zero new attack surface.

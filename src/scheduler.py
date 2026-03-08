@@ -100,6 +100,28 @@ class SchedulerManager:
         except Exception as e:
             logger.warning(f"Failed to send daily heartbeat: {e}")
 
+    def _run_market_data_prefetch(self) -> None:
+        """
+        Run smart fetch for all watchlist pairs via MarketDataOrchestrator.
+        
+        This job runs every hour at :10 to keep the ohlcv_universal cache fresh.
+        It uses smart fetch logic to only fetch stale/missing data.
+        """
+        try:
+            from src.services.market_data_orchestrator import MarketDataOrchestrator
+            with get_db_context() as db:
+                orchestrator = MarketDataOrchestrator(db)
+                result = orchestrator.run_smart_fetch()
+                
+                logger.info(
+                    f"Market data prefetch job done: "
+                    f"{result.total_fetched} fetched, "
+                    f"{result.total_skipped} skipped, "
+                    f"{result.total_errors} errors"
+                )
+        except Exception as exc:
+            logger.warning(f"Market data prefetch job failed: {exc}")
+
     def start(self) -> None:
         """
         Start the background scheduler.
@@ -157,6 +179,21 @@ class SchedulerManager:
             max_instances=1,
         )
 
+        # Market data prefetch: every hour at :10
+        # Runs at same time as position_monitoring to keep ohlcv_universal fresh.
+        # Uses smart fetch logic to only fetch stale/missing data.
+        # Note: May cause API rate limiting if many symbols need refresh.
+        self.scheduler.add_job(
+            func=self._run_market_data_prefetch,
+            trigger='cron',
+            minute=10,
+            hour='*',
+            id="market_data_prefetch",
+            name="Market Data Prefetch",
+            replace_existing=True,
+            max_instances=1,
+        )
+
         logger.info(
             "Scheduled 'position_monitoring' job "
             "(runs every hour at :10 minutes past the hour)"
@@ -164,6 +201,10 @@ class SchedulerManager:
         logger.info(
             "Scheduled 'daily_heartbeat' job "
             "(runs daily at 00:00 UTC / 07:00 GMT+7)"
+        )
+        logger.info(
+            "Scheduled 'market_data_prefetch' job "
+            "(runs every hour at :10 minutes past the hour)"
         )
 
         # Start scheduler in background thread
@@ -311,7 +352,7 @@ def get_scheduler_status() -> dict[str, Any]:
     return {
         "running": _scheduler_manager.is_running(),
         "next_run_time": _scheduler_manager.get_next_run_time(),
-        "job_count": 2,  # position_monitoring + daily_heartbeat
+        "job_count": 3,  # position_monitoring + daily_heartbeat + mtf_cache_prefetch
     }
 
 

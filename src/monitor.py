@@ -169,6 +169,9 @@ class PositionMonitor:
     ) -> Optional[Dict[str, Any]]:
         """
         Fetch market data and calculate signals for a position.
+        
+        Uses ohlcv_universal table as primary data source (read-only).
+        Falls back to DataFetcher API only if data is missing from universal.
 
         Args:
             position: Position to analyze.
@@ -177,23 +180,27 @@ class PositionMonitor:
             Dictionary with data and signals, or None if fetch failed.
         """
         try:
-            source = self._get_data_source_for_pair(position.pair)
-            logger.debug(
-                f"Using {source} for position {position.id} ({position.pair})"
-            )
-
-            # Fetch market data
-            fetcher = DataFetcher(source=source, retry_attempts=2, retry_delay=1.0)
-            df = fetcher.get_ohlcv(
-                symbol=position.pair,
-                timeframe=position.timeframe,
-                limit=100,
-            )
-            fetcher.close()
-
-            if df.empty:
-                logger.warning(f"No data returned for {position.pair}")
-                return None
+            # Try to get data from ohlcv_universal first (read-only, no API calls)
+            df = self._get_data_from_universal(position.pair, position.timeframe, limit=100)
+            
+            # Fallback to API if universal has no data
+            if df is None or df.empty:
+                logger.warning(
+                    f"No data in ohlcv_universal for {position.pair} {position.timeframe}, "
+                    f"fetching from API..."
+                )
+                source = self._get_data_source_for_pair(position.pair)
+                fetcher = DataFetcher(source=source, retry_attempts=2, retry_delay=1.0)
+                df = fetcher.get_ohlcv(
+                    symbol=position.pair,
+                    timeframe=position.timeframe,
+                    limit=100,
+                )
+                fetcher.close()
+                
+                if df is None or df.empty:
+                    logger.warning(f"No data returned for {position.pair}")
+                    return None
 
             current_price = float(df["close"].iloc[-1]) if "close" in df.columns else float(df["Close"].iloc[-1])
 
@@ -218,6 +225,58 @@ class PositionMonitor:
             return None
         except Exception as e:
             logger.error(f"Unexpected error analyzing {position.pair}: {e}")
+            return None
+
+    def _get_data_from_universal(
+        self,
+        pair: str,
+        timeframe: str,
+        limit: int = 100,
+    ):
+        """
+        Get OHLCV data from ohlcv_universal table (read-only).
+        
+        Args:
+            pair: Trading pair symbol.
+            timeframe: Timeframe.
+            limit: Number of candles to fetch.
+            
+        Returns:
+            DataFrame with OHLCV data, or None if not found.
+        """
+        import pandas as pd
+        from sqlalchemy import func
+        from src.models.ohlcv_universal_model import OHLCVUniversal
+        from src.database import get_db_context
+        
+        try:
+            with get_db_context() as db:
+                candles = db.query(OHLCVUniversal).filter(
+                    OHLCVUniversal.symbol == pair,
+                    OHLCVUniversal.timeframe == timeframe,
+                ).order_by(
+                    OHLCVUniversal.timestamp.desc()
+                ).limit(limit).all()
+                
+                if not candles:
+                    return None
+                
+                # Convert to DataFrame
+                data = [c.to_dict() for c in candles]
+                df = pd.DataFrame(data)
+                
+                # Sort by timestamp ascending
+                df = df.sort_values('timestamp').reset_index(drop=True)
+                df.set_index('timestamp', inplace=True)
+                
+                # Select OHLCV columns
+                columns = ['open', 'high', 'low', 'close', 'volume']
+                df = df[columns]
+                
+                return df
+                
+        except Exception as e:
+            logger.error(f"Failed to get data from universal for {pair} {timeframe}: {e}")
             return None
 
     def _determine_overall_status(

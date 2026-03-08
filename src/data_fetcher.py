@@ -621,7 +621,7 @@ class DataFetcher:
         Gate.io provides silver swap contracts which are suitable for price monitoring.
 
         Args:
-            symbol: Trading symbol (e.g., 'XAGUSD').
+            symbol: Trading symbol (e.g., 'XAGUSD', 'XAG/USDT').
             timeframe: Internal timeframe (e.g., 'd1', 'h4').
             limit: Number of candles to fetch.
 
@@ -640,33 +640,63 @@ class DataFetcher:
         })
         gate.load_markets()
 
-        # Gate.io silver symbol (swap contract)
-        gate_symbol = 'XAG/USDT:USDT'
+        # Gate.io silver symbol (swap contract) - try multiple formats
+        gate_symbols_to_try = [
+            'XAG/USDT:USDT',  # Swap contract (preferred)
+            'XAG/USD',        # Spot format
+            'XAGUSD',         # Alternative format
+        ]
+        
+        # Also handle generic symbol mapping
+        if symbol.upper() in ['XAGUSD', 'XAG/USD', 'XAG/USDT']:
+            gate_symbols_to_try = ['XAG/USDT:USDT', 'XAG/USD', 'XAGUSD']
+        elif symbol.upper() in ['XAUUSD', 'XAU/USD', 'XAU/USDT']:
+            gate_symbols_to_try = ['XAU/USDT:USDT', 'XAU/USD', 'XAUUSD']
 
         # Map timeframe to Gate.io interval
         interval = self._map_timeframe_to_gateio(timeframe)
 
-        self.logger.debug(
-            f"Gate.io: symbol={gate_symbol}, interval={interval}, limit={limit}"
-        )
+        # Try each symbol format until one works
+        df = None
+        last_error = None
+        
+        for gate_symbol in gate_symbols_to_try:
+            try:
+                self.logger.debug(
+                    f"Gate.io: trying symbol={gate_symbol}, interval={interval}, limit={limit}"
+                )
 
-        # Fetch OHLCV data
-        ohlcv = gate.fetch_ohlcv(gate_symbol, interval, limit=limit)
+                # Fetch OHLCV data
+                ohlcv = gate.fetch_ohlcv(gate_symbol, interval, limit=limit)
 
-        if not ohlcv:
-            raise RuntimeError(f"Gate.io returned no data for {gate_symbol}")
+                if not ohlcv:
+                    self.logger.debug(f"Gate.io returned no data for {gate_symbol}")
+                    continue
 
-        # Convert to DataFrame
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        df.sort_index(inplace=True)
+                # Convert to DataFrame
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
+                df.sort_index(inplace=True)
 
-        # Convert to numeric types
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Convert to numeric types
+                for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        self.logger.info(f"Successfully fetched {len(df)} candles from Gate.io for {symbol}")
+                self.logger.info(f"Successfully fetched {len(df)} candles from Gate.io for {gate_symbol}")
+                break  # Success!
+                
+            except Exception as e:
+                last_error = str(e)
+                self.logger.debug(f"Gate.io failed for {gate_symbol}: {last_error}")
+                continue
+        
+        if df is None or df.empty:
+            raise RuntimeError(
+                f"Gate.io returned no data for {symbol}. Tried: {gate_symbols_to_try}. "
+                f"Last error: {last_error}"
+            )
+
         return df
 
     def _map_timeframe_to_gateio(self, timeframe: str) -> str:
@@ -725,7 +755,18 @@ class DataFetcher:
             RuntimeError: If CCXT returns no data.
         """
         if self._exchange is None:
-            raise RuntimeError("CCXT exchange not initialized")
+            # Lazy init — DataFetcher may have been created with a different source
+            # but auto-detect routed this call to CCXT.
+            exchange_id = getattr(settings, "ccxt_exchange", "kraken").lower()
+            try:
+                exchange_class = getattr(ccxt, exchange_id)
+                self._exchange = exchange_class()
+                self._exchange.load_markets()
+                self.logger.info(f"CCXT lazy init: {exchange_id}")
+            except Exception as exc:
+                self.logger.warning(f"CCXT lazy init failed ({exchange_id}): {exc} — falling back to kraken")
+                self._exchange = ccxt.kraken()
+                self._exchange.load_markets()
 
         # Normalize symbol for CCXT
         ccxt_symbol = normalize_ticker(symbol, source="ccxt")

@@ -1,7 +1,7 @@
 # Database Structure & Query Guide
 
 **Trading Order Monitoring System**
-*Last Updated: March 2, 2026*
+*Last Updated: March 8, 2026*
 
 ---
 
@@ -13,11 +13,15 @@
    - [positions](#positions-table)
    - [alert_history](#alert_history-table)
    - [signal_changes](#signal_changes-table)
+   - [ohlcv_cache](#ohlcv_cache-table)
+   - [mtf_watchlist](#mtf_watchlist-table)
+   - [market_data_status](#market_data_status-table)
 4. [Entity Relationship Diagram](#entity-relationship-diagram)
 5. [Common Queries](#common-queries)
 6. [Python ORM Usage](#python-orm-usage)
 7. [Database Migrations](#database-migrations)
 8. [Best Practices](#best-practices)
+9. [Related Documentation](#related-documentation)
 
 ---
 
@@ -27,6 +31,9 @@ The Trading Order Monitoring System uses **SQLite** as its primary database for 
 - Trading positions (open and closed)
 - Alert history for audit trail and analysis
 - Signal changes for MA10, OTT, and overall status tracking
+- OHLCV cache for market data (reduces API calls)
+- MTF watchlist for multi-timeframe scanner
+- Market data status for tracking data quality
 
 The system also supports **PostgreSQL** for production deployments via configuration.
 
@@ -272,6 +279,167 @@ CREATE INDEX ix_signal_changes_timestamp_pair ON signal_changes (timestamp, pair
 
 ---
 
+### ohlcv_cache Table
+
+Stores cached OHLCV (candlestick) data to reduce API calls. Populated by DataFetcher when fetching live data.
+
+#### Schema
+
+```sql
+CREATE TABLE ohlcv_cache (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol      VARCHAR(20) NOT NULL,
+    timeframe   VARCHAR(10) NOT NULL,
+    timestamp   DATETIME NOT NULL,
+    open        FLOAT NOT NULL,
+    high        FLOAT NOT NULL,
+    low         FLOAT NOT NULL,
+    close       FLOAT NOT NULL,
+    volume      FLOAT,
+    fetched_at  DATETIME NOT NULL
+);
+
+CREATE UNIQUE INDEX uq_symbol_timeframe_timestamp ON ohlcv_cache (symbol, timeframe, timestamp);
+CREATE INDEX idx_symbol_timeframe ON ohlcv_cache (symbol, timeframe);
+CREATE INDEX idx_timestamp ON ohlcv_cache (timestamp);
+```
+
+#### Columns
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, auto-increment |
+| `symbol` | VARCHAR(20) | NO | Trading pair symbol (e.g., 'BTC/USDT', 'XAU/USD') |
+| `timeframe` | VARCHAR(10) | NO | Timeframe in API format (e.g., '1d', '4h', '1week') |
+| `timestamp` | DATETIME | NO | Candle open time (UTC) |
+| `open` | FLOAT | NO | Opening price |
+| `high` | FLOAT | NO | Highest price |
+| `low` | FLOAT | NO | Lowest price |
+| `close` | FLOAT | NO | Closing price |
+| `volume` | FLOAT | YES | Trading volume (may be 0 for forex/metals) |
+| `fetched_at` | DATETIME | NO | When this candle was first fetched from API |
+
+#### Usage Notes
+
+- **Unique constraint**: Prevents duplicate candles for same symbol/timeframe/timestamp
+- **Incremental fetch**: DataFetcher checks cache before API calls, fetches only missing candles
+- **Multi-timeframe**: Cache supports MTF analysis by storing multiple timeframes per symbol
+- **Data sources**: Twelve Data, CCXT, Gate.io, yfinance (see `src/data_fetcher.py`)
+
+---
+
+### mtf_watchlist Table
+
+Stores the list of trading pairs scanned by the MTF opportunity scanner.
+
+#### Schema
+
+```sql
+CREATE TABLE mtf_watchlist (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair        VARCHAR(20) NOT NULL UNIQUE,
+    added_at    DATETIME NOT NULL,
+    notes       VARCHAR(255)
+);
+
+CREATE INDEX idx_mtf_watchlist_pair ON mtf_watchlist (pair);
+```
+
+#### Columns
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, auto-increment |
+| `pair` | VARCHAR(20) | NO | Trading pair symbol (e.g., 'BTC/USDT', 'ETH/USDT') |
+| `added_at` | DATETIME | NO | When the pair was added to watchlist |
+| `notes` | VARCHAR(255) | YES | Optional notes about the pair |
+
+#### Default Watchlist
+
+Auto-seeded on first run:
+- `BTC/USDT` - Bitcoin
+- `ETH/USDT` - Ethereum
+- `XAU/USD` - Gold
+- `XAG/USD` - Silver
+
+#### Usage Notes
+
+- **CRUD operations**: GET/POST/DELETE endpoints in `src/api/routes_mtf.py`
+- **Dashboard management**: Add/remove pairs via UI (`src/ui_mtf_scanner.py`)
+- **MTF scanner**: Uses watchlist to determine which pairs to scan
+
+---
+
+### market_data_status Table
+
+Tracks data quality and freshness for cached market data. Used by Market Data Status dashboard.
+
+#### Schema
+
+```sql
+CREATE TABLE market_data_status (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair                VARCHAR(20) NOT NULL,
+    timeframe           VARCHAR(10) NOT NULL,
+    candle_count        INTEGER NOT NULL DEFAULT 0,
+    last_candle_time    DATETIME,
+    fetched_at          DATETIME NOT NULL,
+    data_quality        VARCHAR(20) NOT NULL,
+    source              VARCHAR(20),
+    UNIQUE (pair, timeframe)
+);
+
+CREATE INDEX idx_pair_timeframe ON market_data_status (pair, timeframe);
+CREATE INDEX idx_pair ON market_data_status (pair);
+CREATE INDEX idx_data_quality ON market_data_status (data_quality);
+```
+
+#### Columns
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | INTEGER | NO | Primary key, auto-increment |
+| `pair` | VARCHAR(20) | NO | Trading pair symbol |
+| `timeframe` | VARCHAR(10) | NO | Timeframe in normalized format (`w1`, `d1`, `h4`) |
+| `candle_count` | INTEGER | NO | Number of cached candles |
+| `last_candle_time` | DATETIME | YES | Timestamp of most recent candle |
+| `fetched_at` | DATETIME | NO | When this status was last updated |
+| `data_quality` | VARCHAR(20) | NO | Quality level (see enum below) |
+| `source` | VARCHAR(20) | YES | Data source (`ccxt`, `twelvedata`, `gateio`) |
+
+#### Enum Values
+
+**data_quality:**
+- `EXCELLENT` - 200+ candles, age < 2× timeframe interval (full HTF analysis)
+- `GOOD` - 100+ candles, age < 4× timeframe interval (standard analysis)
+- `STALE` - 50-99 candles OR age < 24 hours (refresh recommended)
+- `MISSING` - <50 candles OR age ≥ 24 hours (refresh required)
+
+#### Quality Assessment Logic
+
+```python
+def assess_quality(candle_count, age_hours, timeframe):
+    tf_hours = get_timeframe_hours(timeframe)  # h4=4, d1=24, w1=168
+    
+    if candle_count < 50: return MISSING
+    if candle_count < 100: return STALE
+    
+    if candle_count >= 200 and age_hours < tf_hours * 2:
+        return EXCELLENT
+    if candle_count >= 100 and age_hours < tf_hours * 4:
+        return GOOD
+    return STALE
+```
+
+#### Usage Notes
+
+- **Sync with cache**: `MarketDataService.sync_all_statuses()` populates from OHLCV cache
+- **MTF readiness**: Pair is "MTF Ready" when all required timeframes have GOOD+ quality
+- **Dashboard**: Shows quality badges (🟢🟡🔴) and refresh controls
+- **Prefetch job**: Prioritizes STALE/MISSING pairs for refresh
+
+---
+
 ## Entity Relationship Diagram
 
 ```
@@ -315,9 +483,45 @@ CREATE INDEX ix_signal_changes_timestamp_pair ON signal_changes (timestamp, pair
 │     retry_count         │  │     extra_data          │  │
 │     created_at          │  │     created_at          │  │
 └─────────────────────────┘  └─────────────────────────┘
+
+┌─────────────────────────┐
+│     ohlcv_cache         │
+├─────────────────────────┤
+│ PK  id                  │
+│     symbol              │
+│     timeframe           │
+│     timestamp           │
+│     open/high/low/close │
+│     volume              │
+│     fetched_at          │
+└─────────────────────────┘
+
+┌─────────────────────────┐
+│    mtf_watchlist        │
+├─────────────────────────┤
+│ PK  id                  │
+│     pair (unique)       │
+│     added_at            │
+│     notes               │
+└─────────────────────────┘
+
+┌─────────────────────────┐
+│  market_data_status     │
+├─────────────────────────┤
+│ PK  id                  │
+│     pair                │
+│     timeframe           │
+│     candle_count        │
+│     last_candle_time    │
+│     fetched_at          │
+│     data_quality        │
+│     source              │
+└─────────────────────────┘
 ```
 
 **Note:** There is no foreign key constraint between `alert_history.pair`/`signal_changes.pair` and `positions.pair`. The relationships are logical, allowing tracking of signals and alerts for pairs that may no longer have active positions.
+
+The `ohlcv_cache`, `mtf_watchlist`, and `market_data_status` tables are independent and used by the MTF scanner and market data caching system.
 
 ---
 
@@ -1141,6 +1345,17 @@ sqlite3 data/positions.db ".dump" > backup.sql
 # Restore from dump
 sqlite3 data/positions.db < backup.sql
 ```
+
+---
+
+## Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [`data-fetcher.md`](data-fetcher.md) | DataFetcher multi-provider routing logic |
+| [`market-data-caching.md`](market-data-caching.md) | Market data caching strategy |
+| [`multi-timeframe-scanner.md`](multi-timeframe-scanner.md) | MTF opportunity scanner |
+| [`ohlcv-cache-manager.md`](ohlcv-cache-manager.md) | OHLCV cache management |
 
 ---
 

@@ -1,6 +1,6 @@
 # Feature: Comprehensive Security Audit
 _Status: Done_
-_Last updated: 2026-03-08_
+_Last updated: 2026-03-07_
 
 ## What It Does
 
@@ -147,3 +147,80 @@ Start with items 1 and 2 — they address the only confirmed critical risks. Ite
 - HTTPS/TLS for the API (requires a domain + cert — significant effort for a personal tool)
 - Database encryption at application level (SQLite encryption extensions)
 - Penetration testing
+
+---
+
+## Audit Results — 2026-03-07
+
+### Summary
+
+| # | Area | Severity | Finding | Action | Status |
+|---|------|----------|---------|--------|--------|
+| 1 | API authentication | CRITICAL | Port 8000 open with zero auth — anyone could read/write positions | Implemented `verify_api_key` dependency on all `/api/v1/positions/*` routes. 401 without key, `/health` stays public. | ✅ Fixed |
+| 2 | Firewall port 8000 | Medium | `allow-tadss-api` allows `0.0.0.0/0` | No change — lower priority now API key auth is in place. Task 5 remains in backlog. | ⚠️ Open |
+| 3 | SSH private key | Medium | `~/.ssh/google_compute_engine` on laptop | Permissions verified: `600` (owner-only). `~/.ssh/` directory is `700`. No action needed. | ✅ Clean |
+| 4 | Secrets in git | Medium | `.env` might have been committed | `git log -- .env` returned nothing. `git grep TELEGRAM_BOT_TOKEN` found only code references (field names/comments), no actual values. | ✅ Clean |
+| 5 | Docker container user | Low-Medium | Container runs as root (`.Config.User` empty) | No extra capabilities (`CapAdd: []`). Risk accepted — fix requires Dockerfile rebuild. Deferred. | ⚠️ Accepted |
+| 6 | sqlite-web write risk | Low | Query editor had no read-only enforcement | Confirmed `-r` flag is supported. Updated startup command in `docs/features/remote-db-access.md` to add `-r`. | ✅ Fixed |
+| 7 | Data at rest | Low | SQLite DB stored on VM disk | `gcloud compute disks describe` returned empty `diskEncryptionKey` = GCP default encryption active. No action needed. | ✅ Clean |
+| 8 | Open ports | Low | Expected: 22 + 8000 only | Found: 22 (SSH), 8000 (API), ICMP, 3389 (RDP). RDP is a GCP default firewall rule — no RDP service runs on Linux VM, nothing listening on 3389. Low risk. | ✅ Acceptable |
+
+**Bonus finding:** VM `.env` had permissions `664` (world-readable on VM). Fixed to `600`.
+
+---
+
+### What Was Built / Changed
+
+**`src/api/auth.py`** — new file
+```python
+def verify_api_key(x_api_key: str | None = Header(None)) -> None:
+    if not settings.api_secret_key:
+        return  # Dev mode: no key configured = auth disabled
+    if x_api_key != settings.api_secret_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+```
+
+**`src/api/routes.py`** — router-level dependency (applies to all 9 routes at once):
+```python
+router = APIRouter(
+    prefix="/positions",
+    dependencies=[Depends(verify_api_key)],
+)
+```
+
+**`src/config.py`** — new field:
+```python
+api_secret_key: str | None = None  # Set API_SECRET_KEY in .env to enable
+```
+
+**`src/ui.py`** — `get_api_headers()` helper + added to all 6 `requests.*` calls:
+```python
+def get_api_headers() -> dict:
+    if API_SECRET_KEY:
+        return {"X-API-Key": API_SECRET_KEY}
+    return {}
+```
+
+**VM `.env`** — `API_SECRET_KEY` added (32-byte hex, generated with `openssl rand -hex 32`).
+
+**`docs/features/remote-db-access.md`** — sqlite-web startup command updated to include `-r`.
+
+---
+
+### Verification
+
+```
+curl http://<VM_IP>:8000/api/v1/positions/open          → 401 Unauthorized
+curl -H "X-API-Key: <key>" http://<VM_IP>:8000/...open  → 200 OK
+curl http://<VM_IP>:8000/health                          → 200 OK (public)
+```
+
+---
+
+### Remaining Risk
+
+| Risk | Mitigation in place | To fully resolve |
+|------|-------------------|-----------------|
+| Port 8000 open to internet | API key auth required | Restrict firewall to your IP (Task 5) |
+| Container runs as root | No extra capabilities granted | Add `USER` directive to Dockerfile on next full rebuild |
+| RDP port 3389 open (GCP default rule) | No RDP service on Linux VM | Delete `default-allow-rdp` firewall rule if desired |

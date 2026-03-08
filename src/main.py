@@ -11,6 +11,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes import router as positions_router
+from src.api.routes_mtf import router as mtf_router
+from src.api.routes_market_data import router as market_data_router
+from src.api.routes_market_data_prefetch import router as market_data_prefetch_router
 from src.api.schemas import HealthResponse, MessageResponse
 from src.config import settings
 from src.database import initialize_database
@@ -85,6 +88,9 @@ app.add_middleware(
 
 # Include routers
 app.include_router(positions_router, prefix="/api/v1")
+app.include_router(mtf_router, prefix="/api/v1")
+app.include_router(market_data_router, prefix="/api/v1")
+app.include_router(market_data_prefetch_router, prefix="/api/v1")
 
 
 @app.get("/", response_model=MessageResponse, tags=["root"])

@@ -1,1020 +1,318 @@
-# TA-DSS Data Fetching Guide
+# DataFetcher - Multi-Provider Market Data
 
-**Version:** 2.2.0  
-**Last Updated:** March 6, 2026 (Phase 3 - Gate.io Integration)  
-**Status:** ✅ All Positions Working (Free Tier)
+_Status: Done_
+_Last updated: 2026-03-08_
 
----
+## What It Does
 
-## Table of Contents
+Provides a unified interface for fetching OHLCV (candlestick) market data from multiple free API sources with automatic smart routing. Eliminates API key costs by routing each asset class to the best free provider.
 
-1. [Overview](#1-overview)
-2. [Supported Data Sources](#2-supported-data-sources)
-3. [Smart Routing System](#3-smart-routing-system)
-4. [Multi-Provider Architecture](#4-multi-provider-architecture)
-5. [Configuration](#5-configuration)
-6. [Troubleshooting](#6-troubleshooting)
-7. [Migration Guide](#7-migration-guide)
+**User-facing outcome:** Fetch market data for any trading pair without configuring API keys — crypto via CCXT/Kraken, metals via Twelve Data/Gate.io, forex via Twelve Data.
 
 ---
 
-## 1. Overview
+## Data Source Routing
 
-The TA-DSS system fetches market data from multiple sources to monitor your trading positions using a **multi-provider strategy** for optimal coverage and cost ($0/month).
+### Automatic Detection (`_detect_data_source()`)
 
-### Architecture
+Routes pairs to optimal free data source based on symbol prefix:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Position Monitor (src/monitor.py)                           │
-└─────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Data Fetcher (src/data_fetcher.py)                          │
-│ - Smart routing based on pair symbol                        │
-│ - Multi-provider support (Kraken, Twelve Data, yfinance)    │
-│ - Automatic retry logic                                     │
-│ - Error handling & logging                                  │
-└─────────────────────────────────────────────────────────────┘
-         │
-         ├─────────────────┬─────────────────┬─────────────────┐
-         ▼                 ▼                 ▼                 ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌──────────┐
-│ CCXT/Kraken     │ │ Twelve Data     │ │ yfinance        │ │ Fallback │
-│ (Crypto)        │ │ (Metals/Stocks) │ │ (Stocks)        │ │ Chain    │
-│ FREE            │ │ 800/day FREE    │ │ FREE            │ │          │
-│ No API key      │ │ API key needed  │ │ No API key      │ │          │
-└─────────────────┘ └─────────────────┘ └─────────────────┘ └──────────┘
-```
+| Pair Pattern | Data Source | API Key Required | Reason |
+|--------------|-------------|------------------|--------|
+| `XAG*` (Silver) | **Gate.io** | No (free swap) | Twelve Data requires paid plan for XAG |
+| `XAU*` (Gold) | **Twelve Data** | No (free tier: 800/day) | Reliable, good coverage |
+| `XPT*`, `XPD*` (Platinum, Palladium) | **Twelve Data** | Yes (paid plan) | Limited free tier support |
+| `BTC*`, `ETH*`, `SOL*`, etc. | **CCXT/Kraken** | No (free) | Best crypto coverage, no limits |
+| Stocks (`AAPL`, `TSLA`) | **Twelve Data** | No (free tier) | Reliable for US stocks |
+| Forex (`EURUSD`, `GBPUSD`) | **Twelve Data** | No (free tier) | Default fallback |
 
----
-
-## 2. Supported Data Sources
-
-| Source | Type | Pairs | API Key Required | Free Tier | Status |
-|--------|------|-------|------------------|-----------|--------|
-| **CCXT/Kraken** | Crypto | BTCUSD, ETHUSD, SOLUSD | ❌ No | Unlimited | ✅ Working |
-| **Twelve Data** | Metals/Stocks/Forex | XAU/USD, AAPL, EUR/USD | ✅ Yes | 800/day | ✅ Working (XAU) |
-| **Gate.io** | Metals (Swap) | XAG/USDT:USDT (Silver) | ❌ No | Unlimited | ✅ Working (XAG) |
-| **yfinance** | Stocks | AAPL, TSLA, NVDA | ❌ No | Unlimited | ⚠️ Fallback only |
-| **CCXT/Binance** | Crypto | BTC/USDT, ETH/USDT | ❌ No | Unlimited | ❌ Geo-blocked |
-
-**Multi-Provider Strategy:**
-- **Crypto** → Kraken (free, no API key, works on VM)
-- **Metals (XAU - Gold)** → Twelve Data (free tier)
-- **Metals (XAG - Silver)** → Gate.io (free, swap contract) ✅ NEW
-- **Stocks** → Twelve Data (primary) or yfinance (fallback)
-- **Forex** → Twelve Data (free tier)
-- **Total Cost:** $0/month for all positions
-
----
-
-## 3. Smart Routing System
-
-The data fetcher automatically routes pairs to the best available source:
-
-### Routing Logic (Updated March 6, 2026)
+### Supported Crypto Prefixes
 
 ```python
-def _detect_data_source(pair: str) -> Literal["yfinance", "ccxt", "twelvedata", "gateio"]:
-    pair_upper = pair.upper().replace("-", "").replace("_", "")
-    
-    # Silver (XAG) → Gate.io (free, Twelve Data requires paid plan)
-    if pair_upper.startswith('XAG'):
-        return "gateio"
-    
-    # Gold (XAU) → Twelve Data (free tier works)
-    if pair_upper.startswith('XAU'):
-        return "twelvedata"
-    
-    # Other metals (XPT, XPD) → Twelve Data (if you have paid plan)
-    if pair_upper.startswith(('XPT', 'XPD')):
-        return "twelvedata"
-
-    # Crypto → CCXT/Kraken (free, no API key)
-    if pair_upper.startswith(('BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'XBT')):
-        return "ccxt"
-
-    # Stocks (3-5 letters) → Twelve Data (reliable)
-    if len(pair_upper) <= 5 and pair_upper.isalpha():
-        return "twelvedata"
-
-    # Default → Twelve Data (covers forex like EURUSD)
-    return "twelvedata"
-```
-
-### How It Works
-
-| Pair | Detected Source | Provider | Status |
-|------|-----------------|----------|--------|
-| `BTCUSD` | CCXT | Kraken | ✅ Works |
-| `ETHUSD` | CCXT | Kraken | ✅ Works |
-| `XAUUSD` | Twelve Data | Twelve Data | ✅ Works (free tier) |
-| `XAGUSD` | Gate.io | Gate.io | ✅ Works (free, NEW) |
-| `AAPL` | Twelve Data | Twelve Data | ✅ Works (free tier) |
-| `TSLA` | Twelve Data | Twelve Data | ✅ Works (free tier) |
-| `EURUSD` | Twelve Data | Twelve Data | ✅ Works (free tier) |
-
----
-
-## 4. Multi-Provider Architecture
-
-### Why Multi-Provider?
-
-**Problem:** No single provider supports all asset classes reliably from your VM location.
-
-**Solution:** Use the best provider for each asset class:
-
-| Asset Class | Provider | Why? | Cost |
-|-------------|----------|------|------|
-| **Crypto** | Kraken | Works on VM, no API key, free | $0 |
-| **Metals (XAU/XAG)** | Twelve Data | Reliable spot prices, not geo-blocked | Free (800/day) |
-| **Stocks** | Twelve Data | Consistent data, global coverage | Free (800/day) |
-| **Forex** | Twelve Data | Major pairs available | Free (800/day) |
-
-### Cost Analysis
-
-**Your Current Usage (6 positions):**
-```
-Crypto (1 position: ETHUSD):
-  24 checks/day × 1 = 24 calls/day → Kraken (FREE, unlimited)
-
-Metals - Gold (3 positions: XAUUSD):
-  24 checks/day × 3 = 72 calls/day → Twelve Data (FREE tier: 800/day)
-
-Metals - Silver (2 positions: XAGUSD):
-  24 checks/day × 2 = 48 calls/day → Gate.io (FREE, unlimited)
-
-Total: 144 calls/day
-Twelve Data Free Tier: 800 calls/day
-Usage: 96/800 = 12% of free tier
-Monthly Cost: $0
-```
-
-### Data Flow
-
-```
-Position: XAUUSD (Gold)
-    ↓
-_detect_data_source("XAUUSD") → "twelvedata"
-    ↓
-DataFetcher.get_ohlcv("XAUUSD", "d1")
-    ↓
-_fetch_twelvedata()
-    ↓
-Normalize: XAUUSD → XAU/USD
-Map timeframe: d1 → 1day
-    ↓
-API Request: https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=1day
-    ↓
-Response: JSON with OHLCV data
-    ↓
-DataFrame with columns: Open, High, Low, Close, Volume
-    ↓
-Return to PositionMonitor
-
-Position: XAGUSD (Silver)
-    ↓
-_detect_data_source("XAGUSD") → "gateio"
-    ↓
-DataFetcher.get_ohlcv("XAGUSD", "d1")
-    ↓
-_fetch_gateio()
-    ↓
-Symbol: XAG/USDT:USDT (Gate.io silver swap)
-Map timeframe: d1 → 1d
-    ↓
-API Request: Gate.io fetch_ohlcv()
-    ↓
-Response: OHLCV data
-    ↓
-DataFrame with columns: Open, High, Low, Close, Volume
-    ↓
-Return to PositionMonitor
-```
-
----
-
-## 5. Configuration
-
-### Environment Variables (.env)
-
-```bash
-# CCXT Configuration (Crypto)
-CCXT_EXCHANGE=kraken          # Options: kraken, binance, bybit, kucoin
-CCXT_API_KEY=                 # Optional (not needed for public data)
-CCXT_SECRET=                  # Optional (not needed for public data)
-
-# Twelve Data Configuration (Metals/Stocks/Forex)
-TWELVE_DATA_API_KEY=your_api_key_here  # Get free key at https://twelvedata.com/
-# Free tier: 800 API calls/day (8 calls/minute)
-
-# yfinance (Fallback for stocks)
-# No configuration needed - no API key required
-```
-
-### Getting Your Twelve Data API Key
-
-1. **Sign up** at https://twelvedata.com/pricing
-2. **Free tier** includes:
-   - 800 API credits per day
-   - 8 API credits per minute
-   - Real-time data
-   - All asset classes (stocks, forex, metals, crypto)
-3. **Get API key** from dashboard
-4. **Add to .env**:
-   ```bash
-   TWELVE_DATA_API_KEY=abc123xyz456
-   ```
-
-### Deploy to VM
-
-```bash
-# SSH to VM
-ssh aiagent@35.188.118.182
-cd tadss-monitor
-
-# Edit .env
-nano .env
-
-# Add Twelve Data API key
-TWELVE_DATA_API_KEY=your_api_key_here
-
-# Save and exit (Ctrl+O, Enter, Ctrl+X)
-
-# Restart container
-docker restart tadss
-
-# Verify configuration
-docker exec tadss python3 -c "from src.config import settings; print(f'Twelve Data configured: {bool(settings.twelve_data_api_key)}')"
-```
-
----
-
-## 6. Supported Trading Pairs
-
-### ✅ Fully Supported (Multi-Provider, FREE)
-
-| Symbol | Name | Category | Provider | Status |
-|--------|------|----------|----------|--------|
-| `BTCUSD` | Bitcoin | Crypto | Kraken | ✅ Working |
-| `ETHUSD` | Ethereum | Crypto | Kraken | ✅ Working |
-| `SOLUSD` | Solana | Crypto | Kraken | ✅ Working |
-| `XBTUSD` | Bitcoin (alt.) | Crypto | Kraken | ✅ Working |
-| `XAUUSD` | Gold | Metals | Twelve Data | ✅ Works (free tier) |
-| `XAGUSD` | Silver | Metals | Gate.io | ✅ Works (free, NEW) |
-| `AAPL` | Apple | Stocks | Twelve Data | ✅ Works (free tier) |
-| `TSLA` | Tesla | Stocks | Twelve Data | ✅ Works (free tier) |
-| `EURUSD` | Euro/USD | Forex | Twelve Data | ✅ Works (free tier) |
-
-### ❌ Not Supported
-
-| Symbol | Name | Reason |
-|--------|------|--------|
-| `XPTUSD` | Platinum | Twelve Data requires paid plan |
-| `XPDUSD` | Palladium | Twelve Data requires paid plan |
-
----
-
-## 7. Troubleshooting
-
-### Check Monitoring Status
-
-```bash
-# SSH to your VM
-ssh -i ~/.ssh/google_compute_engine aiagent@35.188.118.182
-
-# View latest monitoring results
-cd tadss-monitor
-tail -20 logs/monitor.log
-```
-
-### Interpret Results
-
-**All Working (Free Tier):**
-```
-Monitoring check completed: 6/6 successful, 0 alerts sent, 0 errors
-# ETHUSD: ✅ Works (Kraken)
-# XAUUSD (3 positions): ✅ Works (Twelve Data free tier)
-# XAGUSD (2 positions): ✅ Works (Gate.io free)
-```
-
-**Twelve Data Not Configured:**
-```
-ERROR - Data fetch failed for XAUUSD: Failed to fetch data for XAUUSD 
-(timeframe: d1) after 2 attempts: Twelve Data API key not configured.
-Add TWELVE_DATA_API_KEY to your .env file
-```
-
-**Solution:** Add Twelve Data API key to .env (see Configuration section)
-
-**Complete Failure:**
-```
-Monitoring check completed: 0/6 successful, 0 alerts sent, 6 errors
-```
-- Check network connectivity
-- Check API keys are valid
-- Check VM can reach APIs
-
-### Test Data Fetch Manually
-
-```bash
-# Test Kraken (crypto)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher(source='ccxt').get_ohlcv('ETHUSD', 'h4', limit=5)
-print(df[['Open', 'High', 'Low', 'Close']])
-"
-
-# Test Twelve Data (metals - XAU)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher(source='twelvedata').get_ohlcv('XAUUSD', 'd1', limit=5)
-print(df[['Open', 'High', 'Low', 'Close', 'Volume']])
-"
-
-# Test Gate.io (metals - XAG silver)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher(source='gateio').get_ohlcv('XAGUSD', 'd1', limit=5)
-print(df[['Open', 'High', 'Low', 'Close']])
-"
-
-# Test Twelve Data (stocks)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher(source='twelvedata').get_ohlcv('AAPL', '1d', limit=5)
-print(df[['Open', 'High', 'Low', 'Close', 'Volume']])
-"
-
-# Test yfinance (fallback - may be geo-blocked)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher(source='yfinance').get_ohlcv('AAPL', '1d', limit=5)
-print(df[['Open', 'High', 'Low', 'Close', 'Volume']])
-"
-```
-
-### Check API Usage
-
-```bash
-# Twelve Data usage (check you're within free tier)
-curl "https://api.twelvedata.com/account?apikey=YOUR_KEY"
-```
-
-### View Data Fetch Logs
-
-```bash
-# Real-time monitoring
-tail -f logs/data_fetch.log
-
-# Search for errors
-grep "ERROR" logs/data_fetch.log | tail -20
-
-# Search for specific pair
-grep "XAUUSD" logs/data_fetch.log
-```
-
-**Partial Failure (Before Twelve Data Setup):**
-```
-Monitoring check completed: 1/6 successful, 0 alerts sent, 5 errors
-```
-- 1 crypto position working (ETHUSD via Kraken)
-- 5 metals/forex positions failing (XAUUSD, XAGUSD → Twelve Data not configured)
-
----
-
-## 8. Migration Guide
-
-### From: Single Provider (Kraken Only)
-### To: Multi-Provider (Kraken + Twelve Data)
-
-**Step 1: Get Twelve Data API Key**
-```bash
-# Visit: https://twelvedata.com/pricing
-# Sign up for free account
-# Copy API key from dashboard
-```
-
-**Step 2: Update Local .env**
-```bash
-# Edit .env in your project directory
-nano .env
-
-# Add:
-TWELVE_DATA_API_KEY=your_api_key_here
-```
-
-**Step 3: Deploy to VM**
-```bash
-# SSH to VM
-ssh aiagent@35.188.118.182
-
-# Navigate to project
-cd tadss-monitor
-
-# Edit .env
-nano .env
-
-# Add Twelve Data API key
-TWELVE_DATA_API_KEY=your_api_key_here
-
-# Save and exit
-```
-
-**Step 4: Restart Container**
-```bash
-docker restart tadss
-```
-
-**Step 5: Verify Configuration**
-```bash
-# Check Twelve Data is configured
-docker exec tadss python3 -c "
-from src.config import settings
-print(f'Twelve Data configured: {bool(settings.twelve_data_api_key)}')
-print(f'CCXT exchange: {settings.ccxt_exchange}')
-"
-
-# Test XAUUSD fetch
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher(source='twelvedata').get_ohlcv('XAUUSD', 'd1', limit=5)
-print(df.tail())
-"
-```
-
-**Step 6: Monitor Results**
-```bash
-# Watch next monitoring cycle
-tail -f logs/monitor.log
-
-# Expected after setup:
-# Monitoring check completed: 6/6 successful, 0 alerts sent, 0 errors
-```
-
-### Expected Results
-
-**Before Migration (Kraken only):**
-```
-Monitoring check completed: 1/6 successful, 0 alerts sent, 5 errors
-# ETHUSD: ✅ Works (Kraken)
-# XAUUSD: ❌ Fails (yfinance geo-blocked)
-# XAGUSD: ❌ Fails (yfinance geo-blocked)
-```
-
-**After Migration (Multi-Provider, Free Tier):**
-```
-Monitoring check completed: 6/6 successful, 0 alerts sent, 0 errors
-# ETHUSD: ✅ Works (Kraken)
-# XAUUSD (3 positions): ✅ Works (Twelve Data free tier)
-# XAGUSD (2 positions): ✅ Works (Gate.io free)
-```
-
-### Rollback (If Needed)
-
-If Twelve Data doesn't work, you can revert:
-
-```bash
-# SSH to VM
-ssh aiagent@35.188.118.182
-cd tadss-monitor
-
-# Remove Twelve Data API key
-nano .env
-# Delete or comment out: TWELVE_DATA_API_KEY=...
-
-# Restart
-docker restart tadss
-```
-
----
-
-## 9. Known Limitations
-
-| Limitation | Impact | Workaround |
-|------------|--------|------------|
-| **Binance blocked** | Cannot use Binance exchange | Using Kraken instead |
-| **Kraken no metals** | XAUUSD, XAGUSD not available | Twelve Data (XAU) + Gate.io (XAG) |
-| **yfinance unreliable** | Stocks may not load on VM | Twelve Data (primary) |
-| **Twelve Data free tier** | 800 calls/day limit | Sufficient for ~33 positions |
-| **VM location restrictions** | Some APIs geo-blocked | Multi-provider strategy |
-| **Gate.io swap contract** | XAG uses swap (not spot) | Acceptable for price monitoring |
-
----
-
-## 10. Session Log: March 6, 2026 Implementation
-
-### Problem (Original)
-- Dashboard showed CORS error
-- Monitor logs showed 0/6 successful checks
-- All data fetches failing due to Binance geo-restriction
-
-### Solution Phase 1 (March 6, 2026 - CORS + Kraken)
-1. Fixed CORS configuration in `src/config.py`
-2. Changed CCXT exchange from Binance to Kraken
-3. Added smart routing in `src/data_fetcher.py`
-
-**Results:**
-- ✅ Dashboard loads successfully
-- ✅ ETHUSD monitoring works (1/6 successful)
-- ❌ XAUUSD, XAGUSD still failing (yfinance geo-blocked)
-
-### Solution Phase 2 (March 6, 2026 - Twelve Data)
-1. Added Twelve Data support in `src/data_fetcher.py`
-2. Added `_fetch_twelvedata()` method
-3. Added `TWELVE_DATA_API_KEY` configuration
-
-**Results:**
-- ✅ XAUUSD working (Twelve Data free tier)
-- ❌ XAGUSD requires paid plan ($45/mo)
-- 4/6 positions working
-
-### Solution Phase 3 (March 6, 2026 - Gate.io for Silver)
-1. Added Gate.io support for XAG (silver)
-2. Added `_fetch_gateio()` method
-3. Added `_map_timeframe_to_gateio()` helper
-4. Updated `_detect_data_source()` to route XAG → Gate.io
-
-**Test Results:**
-```bash
-# XAGUSD Test (✅ Success):
-Gate.io XAGUSD:
-             Open   High    Low  Close
-timestamp                             
-2026-03-02  95.24  96.14  86.51  90.04
-2026-03-03  90.04  91.33  77.99  82.97
-2026-03-04  82.97  86.77  81.90  83.98
-2026-03-05  83.99  85.54  80.57  82.75
-2026-03-06  82.75  84.99  81.65  83.85
-
-# Smart Routing Test:
-XAGUSD -> gateio
-XAUUSD -> twelvedata
-ETHUSD -> ccxt
-AAPL -> twelvedata
-```
-
-**Current Status:**
-- ✅ 6/6 positions working (100%)
-- ✅ $0/month cost (all free tier)
-- ✅ No geo-restriction issues
-- ✅ Multi-provider redundancy
-
-### Files Modified
-- `src/config.py` - Added `twelve_data_api_key`, updated `validate_timeframe()`
-- `src/data_fetcher.py` - Added Twelve Data + Gate.io support, smart routing
-- `.env.example` - Added Twelve Data configuration
-- `DATA_FETCHING_GUIDE.md` - Updated to v2.2.0 with Gate.io
-
----
-
-## 11. API Optimization Strategies
-
-**Version:** 2.3.0  
-**Last Updated:** March 6, 2026  
-**Status:** 📋 Planning Phase
-
----
-
-### Current Usage Analysis
-
-```
-Twelve Data Free Tier: 800 calls/day
-
-Your Current Usage (6 positions):
-Crypto (1 position: ETHUSD):
-  24 checks/day × 1 = 24 calls/day → Kraken (FREE, unlimited)
-
-Metals - Gold (3 positions: XAUUSD):
-  24 checks/day × 3 = 72 calls/day → Twelve Data (FREE tier: 800/day)
-
-Metals - Silver (2 positions: XAGUSD):
-  24 checks/day × 2 = 48 calls/day → Gate.io (FREE, unlimited)
-
-Total: 144 calls/day
-Twelve Data Free Tier: 800 calls/day
-Usage: 96/800 = 12% of free tier
-Remaining: 704 calls/day (88% available)
-Monthly Cost: $0
-```
-
-**Good News:** You're well within the free tier! But here's how to scale to 100+ positions.
-
----
-
-### Strategy 1: Smart Scanning (Timeframe-Based) ✅ **RECOMMENDED**
-
-**Problem:** Checking all positions every hour is wasteful.
-
-**Solution:** Check positions based on their timeframe.
-
-| Position Timeframe | Current | Smart | Savings |
-|-------------------|---------|-------|---------|
-| `m5` | Every 5 min (288/day) | Every 5 min | - |
-| `m15` | Every 1 hour (24/day) | Every 15 min | - |
-| `m30` | Every 1 hour (24/day) | Every 30 min | - |
-| `h1` | Every 1 hour (24/day) | Every 1 hour | - |
-| `h4` | Every 1 hour (24/day) | Every 4 hours (6/day) | **75%** |
-| `d1` | Every 1 hour (24/day) | Every 24 hours (1/day) | **96%** |
-
-**Your Usage with Smart Scanning:**
-```
-XAUUSD d1 (3 positions):  3 × 1 = 3 calls/day (was 72)
-XAGUSD d1/h4 (2 positions): 2 × 6 = 12 calls/day (was 48)
-ETHUSD h4 (1 position):   1 × 6 = 6 calls/day (was 24)
-
-Total: 21 calls/day (was 144)
-Savings: 85% reduction!
-New Twelve Data usage: 2.6% of free tier
-```
-
-**Implementation:**
-```python
-# In src/scheduler.py
-
-TIMEFRAME_CHECK_INTERVAL = {
-    'm1': 1,      # 1 minute
-    'm5': 5,      # 5 minutes
-    'm15': 15,    # 15 minutes
-    'm30': 30,    # 30 minutes
-    'h1': 60,     # 1 hour
-    'h4': 240,    # 4 hours
-    'd1': 1440,   # 24 hours
-    'w1': 10080,  # 7 days
+crypto_prefixes = {
+    'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'DOT', 'MATIC',
+    'LTC', 'AVAX', 'LINK', 'UNI', 'ATOM', 'XLM', 'BCH', 'ALGO', 'VET',
+    'XBT'  # Bitcoin alternative symbol (used by some exchanges)
 }
+```
 
-def should_check_position(position):
-    """Check if position should be scanned based on timeframe."""
-    last_checked = position.last_checked_at
-    interval = TIMEFRAME_CHECK_INTERVAL.get(position.timeframe, 60)
-    
-    return (now - last_checked).total_seconds() >= interval * 60
+Any pair starting with these prefixes routes to CCXT.
 
-# In monitoring loop
-for position in positions:
-    if should_check_position(position):
-        check_position(position)
-    else:
-        logger.debug(f"Skipping {position.pair} (next check in {interval} min)")
+---
+
+## Symbol Normalization
+
+Different APIs use different symbol formats. DataFetcher normalizes automatically:
+
+### Twelve Data Format
+
+| Input | Normalized | Asset Class |
+|-------|------------|-------------|
+| `XAUUSD` | `XAU/USD` | Metals |
+| `XAGUSD` | `XAG/USD` | Metals |
+| `EURUSD` | `EUR/USD` | Forex |
+| `BTCUSD` | `BTC/USD` | Crypto |
+| `AAPL` | `AAPL` | Stocks |
+
+### CCXT Format
+
+Uses `normalize_ticker()` helper from `src/utils/helpers.py`:
+- Converts to exchange-specific format
+- Example: `BTCUSD` → `BTC/USDT` (Kraken format)
+
+### Gate.io Format
+
+Tries multiple formats until one succeeds:
+1. `XAG/USDT:USDT` (swap contract — preferred)
+2. `XAG/USD` (spot format)
+3. `XAGUSD` (alternative)
+
+Also handles gold:
+1. `XAU/USDT:USDT`
+2. `XAU/USD`
+3. `XAUUSD`
+
+---
+
+## Fetch Flow
+
+```
+User/Job requests data for pair
+         ↓
+_detect_data_source(pair)
+         ↓
+    Routes to appropriate source
+         ↓
+    ┌─────────────────┬─────────────────┬──────────────┐
+    │   Twelve Data   │     CCXT        │   Gate.io    │
+    │   (XAU, Forex)  │   (Crypto)      │   (XAG)      │
+    └────────┬────────┴────────┬────────┴──────┬───────┘
+             │                 │               │
+    Normalize symbol    Normalize symbol  Try multiple
+    XAUUSD→XAU/USD      BTC/USDT→...      formats
+             │                 │               │
+    Fetch from API      Fetch from API    Fetch from API
+             │                 │               │
+    Save to cache       Save to cache     Save to cache
+    (ohlcv_cache)       (ohlcv_cache)     (ohlcv_cache)
+             │                 │               │
+             └─────────────────┴───────────────┘
+                          ↓
+              Return DataFrame to caller
 ```
 
 ---
 
-### Strategy 2: Database Storage (Incremental Fetch) ✅ **RECOMMENDED**
+## Key Features
 
-**Problem:** Fetching 100 candles every time wastes API calls.
+### 1. Smart Routing
 
-**Solution:** Store OHLCV data locally, only fetch NEW candles.
-
-**Storage Requirements (SQLite):**
-```
-1 OHLCV candle = 6 fields (timestamp, O, H, L, C, V) = ~56 bytes
-
-Current data (6 positions × 100 candles):
-  600 candles × 56 bytes = 33 KB
-
-1 year of daily data (6 positions):
-  365 days × 6 positions × 56 bytes = 122 KB/year
-
-1 year of hourly data (worst case):
-  8,760 hours × 6 positions × 56 bytes = 2.9 MB/year
-
-**Total for 5 years: ~15 MB** (less than 1 photo!)
-```
-
-**Database Schema:**
-```sql
-CREATE TABLE ohlcv_data (
-    symbol TEXT,
-    timeframe TEXT,
-    timestamp TIMESTAMP,
-    open REAL,
-    high REAL,
-    low REAL,
-    close REAL,
-    volume REAL,
-    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (symbol, timeframe, timestamp)
-);
-
-CREATE INDEX idx_symbol_timeframe ON ohlcv_data(symbol, timeframe);
-```
-
-**Incremental Fetch Logic:**
 ```python
-def fetch_ohlcv_incremental(symbol, timeframe, limit=100):
-    """Only fetch missing candles, reuse historical data."""
-    
-    # Get last stored candle from database
-    last_candle = db.query("""
-        SELECT timestamp FROM ohlcv_data 
-        WHERE symbol=? AND timeframe=? 
-        ORDER BY timestamp DESC LIMIT 1
-    """, (symbol, timeframe))
-    
-    if last_candle:
-        # Calculate how many new candles needed
-        missing = calculate_missing_candles(last_candle['timestamp'])
+# Automatically detects best source
+fetcher = DataFetcher()  # source auto-detected
+
+df = fetcher.get_ohlcv('BTC/USDT', 'd1', limit=100)
+# Routes to CCXT/Kraken automatically
+
+df = fetcher.get_ohlcv('XAU/USD', 'd1', limit=100)
+# Routes to Twelve Data automatically
+
+df = fetcher.get_ohlcv('XAG/USD', 'd1', limit=100)
+# Routes to Gate.io automatically
+```
+
+### 2. Cache-First with Incremental Fetch
+
+1. **Check cache** — Queries `ohlcv_cache` table first
+2. **Calculate missing** — Determines how many new candles needed
+3. **Fetch only missing** — API call for new candles only
+4. **Merge + save** — Combines cached + new, saves to cache
+5. **Return merged** — Returns complete dataset
+
+**Example:**
+```
+Cached: 100 candles (last: 2026-03-07)
+Now: 2026-03-08
+→ Fetch only 1 new candle, not full 100
+```
+
+### 3. Retry Logic
+
+- **Attempts:** 3 retries by default
+- **Backoff:** Exponential (1s, 2s, 4s delays)
+- **Error handling:** Raises `DataFetchError` after all retries fail
+
+### 4. Timeframe Mapping
+
+Maps internal timeframe format to API-specific intervals:
+
+| Internal | Twelve Data | CCXT | Gate.io |
+|----------|-------------|------|---------|
+| `m5` | `5min` | `5m` | `5m` |
+| `h1` | `1h` | `1h` | `1h` |
+| `h4` | `4h` | `4h` | `4h` |
+| `d1` | `1day` | `1d` | `1d` |
+| `w1` | `1week` | `1w` | `7d` |
+
+---
+
+## Current Watchlist Coverage
+
+Your MTF watchlist uses all 3 working free sources:
+
+| Pair | Data Source | Symbol Format | Status |
+|------|-------------|---------------|--------|
+| `BTC/USDT` | CCXT/Kraken | `BTC/USDT` | ✅ Free, no key |
+| `ETH/USDT` | CCXT/Kraken | `ETH/USDT` | ✅ Free, no key |
+| `XAU/USD` | Twelve Data | `XAU/USD` | ✅ Free tier (800/day) |
+| `XAG/USD` | Gate.io | `XAG/USDT:USDT` | ✅ Free swap contract |
+
+---
+
+## API Usage & Costs
+
+### Current Setup ($0/month)
+
+| Provider | Daily Limit | Current Usage | Cost |
+|----------|-------------|---------------|------|
+| CCXT/Kraken | Unlimited | ~40 calls/day | $0 |
+| Twelve Data | 800 calls/day | ~80 calls/day | $0 |
+| Gate.io | Unlimited | ~40 calls/day | $0 |
+
+### Usage Breakdown
+
+**Prefetch job (every 2 hours):**
+- 4 pairs × 5 timeframes × 12 runs/day = 240 calls/day
+- Reduced to ~160/day with cache-first (80% reduction)
+
+**Manual scans:**
+- Zero API calls (all from cache)
+
+**Total:** ~160-200 calls/day to Twelve Data (well within 800 free limit)
+
+---
+
+## As Built
+
+_Added after implementation — 2026-03-08_
+
+### What Changed from Design
+
+1. **Added Gate.io integration** — Originally only Twelve Data for XAG, but free tier doesn't support silver
+2. **Added lazy CCXT init** — `_fetch_ccxt()` initializes exchange on first call if not configured in constructor
+3. **Added symbol fallback logic** — Tries multiple formats (e.g., `XAG/USDT:USDT`, `XAG/USD`, `XAGUSD`)
+
+### Final Implementation
+
+```python
+# src/data_fetcher.py
+class DataFetcher:
+    def __init__(self, source="twelvedata", retry_attempts=3, retry_delay=1.0):
+        # Initialize exchange if CCXT
+        # Setup logging
         
-        if missing == 0:
-            # No new candles, return from DB
-            logger.info(f"Using cached data for {symbol} {timeframe}")
-            return db.get_ohlcv(symbol, timeframe, limit)
-        
-        # Fetch only missing candles
-        logger.info(f"Fetching {missing} new candles for {symbol}")
-        new_data = api.fetch(symbol, timeframe, limit=missing)
-        db.save(new_data)
-    
-    # Return from database
-    return db.get_ohlcv(symbol, timeframe, limit)
+    def get_ohlcv(self, symbol, timeframe, limit=100, auto_detect_source=True):
+        # Auto-detect source based on symbol
+        # Validate timeframe
+        # Check cache first
+        # Fetch from API if needed
+        # Save to cache
+        # Return DataFrame
 ```
 
-**Savings:** 80-90% reduction (only fetch new candles)
+### Known Limitations
+
+1. **Twelve Data free tier limits:**
+   - 800 calls/day
+   - No 4h interval (uses 1h as proxy)
+   - XAG/USD requires paid plan (use Gate.io instead)
+
+2. **CCXT rate limits:**
+   - Kraken: ~15 requests/minute
+   - Handled by built-in rate limiting
+
+3. **Gate.io history:**
+   - Returns ~50-100 candles (limited vs CCXT's 500+)
+   - Sufficient for monitoring, not for deep backtesting
+
+4. **Symbol format variations:**
+   - Old cache entries may have `1w`, `1week`, `w1` for same pair
+   - UI merges duplicates via `_merge_timeframe_data()`
+
+### Follow-up Tasks
+
+- [ ] Add fallback chain (if Twelve Data fails, try yfinance)
+- [ ] Add data validation (check for gaps, outliers)
+- [ ] Add batch fetch for multiple pairs (reduce API calls)
+- [ ] Add WebSocket support for real-time updates (future enhancement)
 
 ---
 
-### Strategy 3: Dashboard Reads from Database ✅ **CRITICAL**
+## Testing
 
-**Your Concern:** *"Database storage does not solve dashboard refresh → API call issue"*
+**Integration tests:**
+- Test data source detection for each asset class
+- Test symbol normalization
+- Test cache-first behavior
+- Test retry logic
 
-**You're absolutely correct!** Database alone doesn't solve it. Here's the correct architecture:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ CORRECT ARCHITECTURE: SEPARATION OF CONCERNS                │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  MONITORING (Background Scheduler)                          │
-│  - Runs every hour (or timeframe-based)                    │
-│  - Fetches from API → Stores in Database                   │
-│  - Independent of dashboard                                │
-│  - Uses smart scanning + incremental fetch                 │
-│                                                             │
-│  DASHBOARD (User Interface)                                 │
-│  - Reads from Database ONLY                                │
-│  - ZERO API calls from dashboard                           │
-│  - Fast loading (no API latency)                           │
-│  - Can refresh unlimited times                             │
-│                                                             │
-│  IN-MEMORY CACHE (Optional, for real-time feel)            │
-│  - Cache last 5 minutes for dashboard                      │
-│  - Expires after 5 minutes                                 │
-│  - Reduces database reads                                  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-
-Data Flow:
-  API → Scheduler → Database → Dashboard
-        (writes)    (stores)   (reads only)
-```
-
-**Implementation:**
-
-```python
-# In src/api/positions.py (Dashboard API)
-
-@router.get("/positions/open")
-async def get_open_positions():
-    """Get open positions - reads from database ONLY."""
-    positions = db.get_open_positions()
-    
-    for position in positions:
-        # Read OHLCV from database (no API call!)
-        ohlcv = db.get_ohlcv(position.pair, position.timeframe, limit=100)
-        
-        # Calculate signals from cached data
-        position.signals = calculate_signals(ohlcv)
-        position.pnl = calculate_pnl(position, ohlcv)
-    
-    return positions
-
-# In src/scheduler.py (Background Monitor)
-
-@scheduler.scheduled_job('cron', minute='10')  # Run at :10 every hour
-async def monitor_positions():
-    """Monitor positions - fetches from API."""
-    positions = db.get_open_positions()
-    
-    for position in positions:
-        if should_check_position(position):  # Smart scanning
-            # Fetch from API (incremental)
-            ohlcv = fetch_ohlcv_incremental(position.pair, position.timeframe)
-            
-            # Update position
-            update_position_signals(position, ohlcv)
-            check_alerts(position)
-```
-
-**Benefits:**
-- ✅ Dashboard can refresh unlimited times (0 API calls)
-- ✅ Monitoring runs independently on schedule
-- ✅ Fast dashboard loading (no API latency)
-- ✅ Works even if API is temporarily down
-- ✅ Historical data always available
-
----
-
-### Strategy 4: Change Detection ✅ **NICE TO HAVE**
-
-**Problem:** Fetching data when price hasn't moved is wasteful.
-
-**Solution:** Check price change first, only fetch if significant movement.
-
-```python
-def should_fetch_new_data(position, cached_data):
-    """Skip API call if price hasn't moved much."""
-    if not cached_data:
-        return True
-    
-    last_close = cached_data['close'].iloc[-1]
-    
-    # Get current price (cheap quote API, not full OHLCV)
-    current_price = get_current_price(position.pair)  # Free/cheap
-    
-    price_change_pct = abs(current_price - last_close) / last_close * 100
-    
-    # Only fetch full OHLCV if price moved > 0.5%
-    if price_change_pct > 0.5:
-        logger.info(f"{position.pair} moved {price_change_pct:.2f}%, fetching data")
-        return True
-    else:
-        logger.debug(f"{position.pair} stable ({price_change_pct:.2f}%), using cache")
-        return False
-```
-
-**Savings:** 30-50% on stable market days
-
----
-
-### Strategy 5: Priority-Based Scanning ✅ **ADVANCED**
-
-**Problem:** All positions treated equally, but some need more attention.
-
-**Solution:** Check critical positions more frequently.
-
-```python
-PRIORITY_LEVELS = {
-    'CRITICAL': 1.0,    # Check at full frequency
-    'WARNING': 0.5,     # Check at 50% frequency
-    'HEALTHY': 0.25,    # Check at 25% frequency
-}
-
-def get_check_interval(position):
-    base_interval = TIMEFRAME_CHECK_INTERVAL[position.timeframe]
-    priority_multiplier = PRIORITY_LEVELS.get(position.health_status, 0.5)
-    
-    return base_interval / priority_multiplier
-
-# Examples:
-# CRITICAL h4 position: 240 min / 1.0 = 240 min (4 hours)
-# HEALTHY h4 position:  240 min / 0.25 = 960 min (16 hours)
-```
-
-**Savings:** 40-60% for healthy positions
-
----
-
-### Combined Impact
-
-| Strategy | Individual Savings | Combined |
-|----------|-------------------|----------|
-| **Current** | - | 144 calls/day |
-| **Smart Scanning** | 85% | 21 calls/day |
-| **+ Database** | 80% | 4 calls/day |
-| **+ Dashboard DB Reads** | 100% (dashboard) | 4 calls/day |
-| **+ Change Detection** | 30% | 3 calls/day |
-
-**Final Result:**
-```
-Before: 144 calls/day (12% of free tier)
-After:  3 calls/day (0.4% of free tier)
-
-Savings: 98% reduction!
-Room to scale: 800/3 = 266x more positions!
-```
-
----
-
-### Implementation Priority
-
-| Phase | Strategy | Impact | Effort | Priority |
-|-------|----------|--------|--------|----------|
-| **Phase 1** | Dashboard Reads from DB | 100% (dashboard) | Low | 🔴 **Do First** |
-| **Phase 1** | Smart Scanning | 85% | Low | 🔴 **Do First** |
-| **Phase 2** | Database Storage | 80% | Medium | 🟡 **Next** |
-| **Phase 3** | Change Detection | 30% | Low | 🟢 **Optional** |
-| **Phase 3** | Priority-Based | 40% | Medium | 🟢 **Optional** |
-
----
-
-### Recommended Next Steps
-
-1. **Immediate (Phase 1):**
-   - Update dashboard API to read from database
-   - Implement smart scanning in scheduler
-   - **Result:** 95% reduction, dashboard refreshes are free
-
-2. **Short-term (Phase 2):**
-   - Add OHLCV database tables
-   - Implement incremental fetch
-   - **Result:** 98% reduction, can scale to 100+ positions
-
-3. **Long-term (Phase 3):**
-   - Add change detection
-   - Add priority-based scanning
-   - **Result:** Maximum efficiency, minimal API usage
-
----
-
-## 12. Getting Help
-
-**Logs Location:**
-```
-tadss-monitor/logs/monitor.log      # Monitoring results
-tadss-monitor/logs/data_fetch.log   # Data fetch details
-tadss-monitor/logs/telegram.log     # Telegram notifications
-```
-
-**Useful Commands:**
+**Manual testing:**
 ```bash
-# Check current exchange
-docker exec tadss python3 -c "from src.config import settings; print(settings.ccxt_exchange)"
+# Test crypto fetch
+python -c "from src.data_fetcher import DataFetcher; f = DataFetcher(); print(f.get_ohlcv('BTC/USDT', 'd1', 10))"
 
-# Check Twelve Data configured
-docker exec tadss python3 -c "from src.config import settings; print(bool(settings.twelve_data_api_key))"
+# Test metals fetch
+python -c "from src.data_fetcher import DataFetcher; f = DataFetcher(); print(f.get_ohlcv('XAU/USD', 'd1', 10))"
 
-# Test Kraken (crypto)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher('ccxt').get_ohlcv('ETHUSD', 'h4', limit=5)
-print(df[['Open', 'High', 'Low', 'Close']])
-"
-
-# Test Twelve Data (metals - XAU)
-docker exec tadss python3 -c "
-from src.data_fetcher import DataFetcher
-df = DataFetcher('twelvedata').get_ohlcv('XAUUSD', 'd1', limit=5)
-print(df[['Open', 'High', 'Low', 'Close', 'Volume']])
-"
-
-# View monitoring summary
-grep "completed" logs/monitor.log | tail -10
+# Test silver fetch
+python -c "from src.data_fetcher import DataFetcher; f = DataFetcher(); print(f.get_ohlcv('XAG/USD', 'd1', 10))"
 ```
-
-**Documentation:**
-- `DASHBOARD_DOCUMENTATION.md` - Dashboard usage guide
-- `MARKET_DATA_API_COMPARISON.md` - API provider comparison (Alpha Vantage, Twelve Data, Polygon, Kraken, Binance, yfinance)
-- `DATA_FETCHING_GUIDE.md` - This guide (data fetching strategy)
-- `README.md` - Project overview
-- `DEPLOYMENT_247_GUIDE.md` - 24/7 deployment instructions
 
 ---
 
-## Summary
+## Deployment Notes
 
-**Implementation Complete:** ✅ **ALL 5 OPTIMIZATIONS IMPLEMENTED** (March 7, 2026)
+**Environment variables required:**
+```bash
+# Twelve Data API key (free tier: 800 calls/day)
+TWELVE_DATA_API_KEY=your_key_here
 
-**What Works:**
-- ✅ Crypto (BTCUSD, ETHUSD, SOLUSD) → Kraken (free)
-- ✅ Gold (XAUUSD) → Twelve Data (free tier)
-- ✅ Silver (XAGUSD) → Gate.io (free)
-- ✅ Stocks (AAPL, TSLA) → Twelve Data (free tier)
-- ✅ Forex (EURUSD) → Twelve Data (free tier)
+# CCXT exchange (default: kraken)
+CCXT_EXCHANGE=kraken
+```
 
-**Cost:**
-- **Total:** $0/month (all free tier)
+**No API key needed for:**
+- CCXT/Kraken (free, public API)
+- Gate.io (free, public API)
 
-**Provider Summary:**
-| Provider | Assets | Cost |
-|----------|--------|------|
-| Kraken | Crypto | Free |
-| Twelve Data | Gold, Stocks, Forex | Free (800/day) |
-| Gate.io | Silver | Free |
+**Cache initialization:**
+```python
+from src.database import get_db_context
+from src.services.ohlcv_cache_manager import OHLCVCacheManager
 
-**Optimization Results:**
-| Strategy | Before | After | Savings | Status |
-|----------|--------|-------|---------|--------|
-| Smart Scanning | 144/day | 21/day | 85% | ✅ Implemented |
-| Database Storage | 21/day | 4/day | 81% | ✅ Implemented |
-| Dashboard Cache | 4/day | ~1/day | 75% | ✅ Implemented |
-| Fresh Fallback | - | Always fresh | - | ✅ Implemented |
-| UI Optimization | 7/refresh | 1/refresh | 86% | ✅ Implemented |
-| **TOTAL** | **144/day** | **~1-2/day** | **99.3%** | ✅ **ALL DONE** |
+with get_db_context() as db:
+    cache_mgr = OHLCVCacheManager(db)
+    # Cache table created automatically on init
+```
 
-**Scale Potential:**
-- Before: 144 calls/day (18% of free tier)
-- After: ~1-2 calls/day (0.1-0.25% of free tier)
-- Room to grow: **400x more positions** on free tier!
+---
 
-**Performance:**
-- Page load: 6-18 sec → <2 sec (85% faster)
-- Dashboard refreshes: Unlimited (0 API calls)
-- Cache hit rate: >95%
+## Related Files
 
-**Documentation:**
-- `SESSION_LOG_2026-03-07_API_OPTIMIZATION.md` - Full implementation log
-- `MARKET_DATA_API_COMPARISON.md` - Provider comparison
-- `SILVER_DATA_SOURCES.md` - Gate.io for XAGUSD
+| File | Purpose |
+|------|---------|
+| `src/data_fetcher.py` | Main implementation (1013 lines) |
+| `src/config.py` | Timeframe validation, settings |
+| `src/services/ohlcv_cache_manager.py` | Cache management |
+| `src/models/ohlcv_cache_model.py` | Cache table schema |
+| `src/utils/helpers.py` | `normalize_ticker()` helper |
+
+---
+
+## References
+
+- [Twelve Data API Docs](https://twelvedata.com/docs)
+- [CCXT Docs](https://docs.ccxt.com/)
+- [Gate.io API Docs](https://www.gate.io/docs/developers/apiv4/)
+- `docs/features/market-data-caching.md` — Cache-first architecture
+- `docs/decisions.md` — DEC-018 (Cache-first architecture)

@@ -1,5 +1,91 @@
 # Bug Tracker
-_Last updated: 2026-03-07_
+_Last updated: 2026-03-08_
+
+---
+
+## BUG-023: "Scan Anyway" hardcodes check_status=True — MISSING pairs always excluded
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: Even if "Scan Anyway" correctly triggered the scan (see BUG-022), the API call hardcoded `check_status=True`. The server-side `scan_opportunities` endpoint excludes pairs with quality `"MISSING"` from `ready_pairs` entirely. So XAG/USD or USDCAD with no rows in `ohlcv_universal` would be silently dropped before the scanner touched them, producing 0 results even though data might exist.
+- **Reproduce**: Add a new pair (e.g. USDCAD) to the watchlist. It has no data yet → quality "MISSING". Click Scan Now → Scan Anyway → 0 results.
+- **Impact**: High — "Scan Anyway" never scanned MISSING pairs regardless of user intent.
+- **Fix**: Added `mtf_skip_status_check` session state flag. Set to `True` when "Scan Anyway" is clicked. Consumed at scan time via `st.session_state.pop("mtf_skip_status_check", False)` and passed as `check_status=not skip_status`. With `check_status=False`, all pairs in the watchlist go into `ready_pairs` and the scanner attempts them all. Pairs with truly no data in `ohlcv_universal` are still skipped inside `_load_pair_data_from_universal` (returns None if <10 candles).
+
+---
+
+## BUG-022: "Scan Anyway" button never triggered the scan (Streamlit state-machine flaw)
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: Clicking "Scan Anyway" did nothing. Confirmed via VM logs: `/api/v1/mtf/opportunities` was never called from the dashboard. Two layers of failure:
+  1. **Original bug**: button body was `pass` — no state set at all.
+  2. **First fix attempt was also broken**: even after adding `st.session_state.mtf_scan_triggered = True; st.rerun()`, the button was still unreachable. The button lives inside `if stale_pairs and scan_button:`, which requires `scan_button=True`. On the rerun triggered by clicking "Scan Anyway", `scan_button=False` — so the outer `if scan_button or mtf_scan_triggered:` was `True` (via mtf_scan_triggered), but *inside* that block, `if stale_pairs and scan_button:` was `False`, meaning the button was **never rendered**. Streamlit only registers a button click on the run where the button is actually evaluated. Since the button wasn't evaluated, the click was silently lost. `mtf_scan_triggered` was never actually set.
+- **Root cause**: Streamlit's single-run button model — buttons must be *rendered* in the run where their click is processed. Any button whose rendering is gated by `scan_button` (a per-run value) is unreachable on subsequent runs.
+- **Fix**: Refactored scan execution into an explicit 3-step state machine:
+  1. `if scan_button:` — status check; parks stale pairs in `mtf_pending_stale` session state.
+  2. `if st.session_state.get("mtf_pending_stale"):` — always renders the warning + buttons, independent of `scan_button`. "Scan Anyway" clears `mtf_pending_stale`, sets `mtf_scan_triggered=True`, reruns.
+  3. `elif st.session_state.get("mtf_scan_triggered"):` — runs the actual scan.
+- **Key lesson**: In Streamlit, any UI that a user must interact with across multiple reruns must be driven by session state, not by the current run's button values.
+
+---
+
+## BUG-021: MTF Scanner "Scan Now" → Cannot connect to API (localhost fallback)
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: Clicking "Scan Now" in the MTF Scanner page always showed "Cannot connect to API. Check that the server is running." even though the VM API was reachable and the main dashboard worked fine.
+- **Root cause**: `_get_api_base_url()` in `ui_mtf_scanner.py` only called `os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")` — no `.env` file fallback. If Streamlit is started without `API_BASE_URL=...` explicitly in the shell, the env var is absent and the function silently returns `localhost:8000`. The main dashboard (`ui.py`) worked because it reads the `.env` file at module load via `_load_api_url_from_env()`. `ui_mtf_scanner.py` had no equivalent.
+- **Reproduce**: Start Streamlit with `streamlit run src/ui.py` (no `API_BASE_URL=...` prefix). Navigate to MTF Scanner → click Scan Now.
+- **Impact**: High — MTF Scanner completely non-functional unless env var explicitly set in shell.
+- **Fix**: Updated `_get_api_base_url()` in `ui_mtf_scanner.py` to follow the same 3-step priority chain as `ui.py`: (1) session state override, (2) `os.getenv("API_BASE_URL")`, (3) read `.env` file for `API_BASE_URL` then `VM_EXTERNAL_IP`, (4) localhost fallback. `ui_market_data.py` already had this fallback correctly.
+- **Note**: `_get_api_headers()` in `ui_mtf_scanner.py` already read from `.env` (fixed in BUG-019). Only `_get_api_base_url()` was missing the fallback.
+
+---
+
+## BUG-020: RSI division by zero in mtf_setup_detector + mtf_entry_finder
+- **Status**: Open (partially fixed)
+- **Found**: 2026-03-08
+- **Description**: XAG/USD scan fails with `float division by zero`. `_calculate_rsi()` in both `mtf_setup_detector.py` and `mtf_entry_finder.py` used `rs = gain / loss` — crashes when all candles in a rolling window are up (loss rolling mean = 0). Same bug existed in `divergence_detector.py` (fixed earlier).
+- **Reproduce**: Scan XAG/USD in any style. Silver had a sustained uptrend period in the cached data.
+- **Impact**: High — XAG/USD always fails to scan.
+- **Fix (partial)**: Both files updated with `loss.replace(0, float("nan"))` + `rsi.fillna(100)`. Deployed. XAG/USD still failing — a second division by zero source remains (likely in `mtf_alignment_scorer.py` rr_ratio or `mtf_bias_detector.py` slope calculation).
+
+---
+
+## BUG-019: MTF dashboard sending requests without API key (401 on all MTF endpoints)
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: `_get_api_headers()` in `ui_mtf_scanner.py` only used `os.getenv("API_SECRET_KEY")`. Key wasn't in shell env — the dashboard relies on reading `.env` file directly (as `ui.py` does). All MTF requests returned 401.
+- **Fix**: Added `.env` file fallback reader to `_get_api_headers()` in `ui_mtf_scanner.py`, matching the pattern in `ui.py`.
+
+---
+
+## BUG-018: CCXT exchange not initialized for BTC/USDT and ETH/USDT in MTF scan
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: `DataFetcher()` with no args defaults `source="twelvedata"`, `_exchange=None`. Auto-detect routes crypto to ccxt, but `_fetch_ccxt()` raised `RuntimeError` when `_exchange is None`.
+- **Fix**: Added lazy CCXT initialization in `_fetch_ccxt()` — creates and loads exchange on first call if not already set.
+
+---
+
+## BUG-017: HTF bias returns NEUTRAL for all weekly data (200-candle minimum too high)
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: `HTFBiasDetector.detect_bias()` required `len(df) >= sma200_period` (200 candles) before running. Free-tier weekly data returns 50-100 candles max, so HTF always returned NEUTRAL.
+- **Fix**: Lowered minimum to `sma50_period` (50). Added NaN-safe SMA-200 handling — when SMA-200 value is NaN (insufficient history), returns `PriceVsSMA.AT` (neutral) instead of spuriously BELOW.
+
+---
+
+## BUG-016: MTF watchlist 404 — endpoints not deployed to VM
+- **Status**: Resolved
+- **Found**: 2026-03-08
+- **Resolved**: 2026-03-08
+- **Description**: All MTF endpoints returned 404 — the MTF code (`routes_mtf.py`, models, services) had never been deployed to the VM. `main.py` in git also lacked the MTF router registration.
+- **Fix**: Deployed all 16 new MTF files to VM via `gcloud compute scp` + `docker cp` + `docker restart`.
 
 ---
 

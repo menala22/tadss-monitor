@@ -1,9 +1,45 @@
 # Dev Log
-_Last updated: 2026-03-08_
+_Last updated: 2026-03-08 (Phase 6-8 complete)_
 
 ---
 
-## 2026-03-08 — Security Audit
+## 2026-03-08 — Internal Market Database Migration Complete (Phases 6-8)
+Started: Complete migration to ohlcv_universal architecture.
+Done: Phase 6 (Position Monitor migrated to ohlcv_universal, <100ms checks, zero API calls), Phase 8 (removed redundant mtf_cache_prefetch scheduler job, 4→3 jobs); deployed to VM and verified; Phase 7 logged as optional backlog (dashboard charts, low priority), Phase 9 scheduled for after 7-14 days monitoring (ohlcv_cache cleanup). All critical consumers now read from ohlcv_universal. See `docs/tasks.md` for remaining items.
+
+---
+
+## 2026-03-08 — MTF Scanner dashboard bug-fix session
+Started: Troubleshoot MTF Scanner "Scan Now" giving ConnectionError and "Scan Anyway" returning no results.
+Done: Fixed 3 bugs in `ui_mtf_scanner.py` — missing `.env` fallback in `_get_api_base_url()` (BUG-021), Streamlit state-machine flaw making "Scan Anyway" unreachable (BUG-022/023). Final resolution: removed stale-data pre-check entirely; scan now fires immediately on "Scan Now" with `check_status=False` (DEC-023). Verified 0 INTRADAY opportunities is correct (all pairs in consolidation on h4). USDCAD removed from watchlist (wrong symbol format); needs re-adding as USD/CAD.
+
+---
+
+## 2026-03-08 — Internal Market Database Architecture (Phases 1-5)
+Started: Build internal market database with ohlcv_universal as single source of truth.
+Done: Created `ohlcv_universal` table (normalized symbols/timeframes) + `MarketDataOrchestrator` service (smart fetch, staleness detection, provider routing) + scheduler job (every hour at :10) + manual prefetch API endpoints; migrated MTF scanner to read-only from ohlcv_universal; 2,844 candles migrated; 5/5 Phase 5 tests passed; ohlcv_cache ready for cleanup. See `docs/features/internal-market-database-architecture.md`.
+
+---
+
+## 2026-03-08 — Market Data Caching Feature (Phase 8)
+Started: Build market data caching strategy to eliminate slow/costly API calls during MTF scans.
+Done: Created `market_data_status` table + `MarketDataService` (25+ methods) + 6 API endpoints + dashboard page (`ui_market_data.py`); implemented 4-tier quality system (EXCELLENT/GOOD/STALE/MISSING) with timeframe-relative thresholds; added timeframe normalization (`1week`/`1w` → `w1`) with duplicate merging; MTF scanner now checks status before scanning and shows actionable errors; 68 tests passing; deployed to VM; cleaned up duplicate timeframe entries; BTC/USDT now shows MTF Ready: ✅ with correct quality (GOOD/EXCELLENT). See `docs/features/market-data-caching.md`, DEC-018/019/020.
+
+---
+
+## 2026-03-08 — MTF wiring, watchlist, cache-first architecture
+Started: Wire remaining MTF pieces (TargetCalculator, auth, notifier), build watchlist management, implement cache-first scan strategy.
+Done: TargetCalculator wired into alignment scorer; API key auth on all MTF routes; notifier wired into scan endpoints; persistent DB-backed watchlist with full CRUD (add/remove/seed defaults); fixed 401 on MTF dashboard (env file fallback for API key); fixed CCXT lazy init for BTC/ETH; lowered HTF minimum candles 200→50 (free-tier weekly data); fixed RSI div/0 in divergence_detector, mtf_setup_detector, mtf_entry_finder; implemented cache-first MTF scan (`mtf_cache_prefetcher.py` + scheduler job every 2h at :20, routes go cache-only with no live fallback); deployed all to VM — 4/5 watchlist pairs now scan successfully.
+
+---
+
+## 2026-03-07 — MTF Scanner (6 sessions)
+Started: Build multi-timeframe opportunity scanner from scratch (6 planned sessions).
+Done: Complete MTF feature — HTF bias detector (50/200 SMA, price structure), MTF setup detector (pullback, divergence, breakout), LTF entry finder (candlestick patterns, EMA reclaim), alignment scorer (0-3), divergence detector (4 types), target calculator (5 methods), S/R detector, opportunity scanner, 5 API endpoints, dashboard panel, Telegram alerts, Gate.io integration for XAGUSD. 149 unit tests passing; grand total 266 tests. See `docs/features/multi-timeframe-scanner.md`.
+
+---
+
+## 2026-03-07 — Security Audit
 Started: Comprehensive security audit (all 8 attack surfaces from security-audit.md).
 Done: API key auth implemented and deployed (401 without key, 200 with key, /health public). VM .env permissions fixed 664→600. sqlite-web startup updated to use -r flag (read-only enforced). Git history clean (no secrets). Disk encrypted (GCP default). Docker caps: none added. Firewall RDP rule present (GCP default, Linux VM, no service listening — low risk). Firewall port 8000 still open to 0.0.0.0/0 — Task 5 remains.
 
