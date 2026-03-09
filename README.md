@@ -3,7 +3,7 @@
 > **Technical Analysis Decision Support System** — monitors manually-executed trading positions with automated technical analysis and Telegram alerts.
 
 _Status: Stable — production live on Google Cloud_
-_Last updated: 2026-03-08_
+_Last updated: 2026-03-09_
 
 ---
 
@@ -111,6 +111,55 @@ curl "http://localhost:8000/api/v1/mtf/configs"
 
 See [`docs/features/mtf-user-guide.md`](docs/features/mtf-user-guide.md) for the full user guide.
 See [`docs/features/multi-timeframe-scanner.md`](docs/features/multi-timeframe-scanner.md) for architecture and design notes.
+
+---
+
+## New: MTF Opportunity Tracking System
+
+**Automated hourly MTF scanning with opportunity persistence and Telegram alerts.**
+
+The MTF Opportunity Tracking System automatically scans for trading opportunities every hour at :30 using the upgraded 4-layer MTF framework:
+
+**What It Does:**
+- **Hourly Scanning** - Runs automatically at :30 past every hour
+- **4-Layer Framework** - Context classification, setup detection, quality scoring, weighted alignment
+- **Database Persistence** - All opportunities saved to `mtf_opportunities` table
+- **Telegram Alerts** - Sent for high-conviction setups (weighted score ≥ 0.60)
+- **Auto-Expiration** - Opportunities expire after 24 hours
+- **Dashboard Integration** - View all opportunities in "💼 MTF Opportunities" page
+
+**Dashboard:**
+```bash
+streamlit run src/ui.py --server.port 8503
+# Navigate to "💼 MTF Opportunities"
+```
+
+**API:**
+```bash
+# List active opportunities with minimum weighted score
+curl "http://localhost:8000/api/v1/mtf-opportunities?status=ACTIVE&min_weighted_score=0.60"
+
+# Get statistics
+curl "http://localhost:8000/api/v1/mtf-opportunities/stats"
+
+# Filter by context
+curl "http://localhost:8000/api/v1/mtf-opportunities?mtf_context=TRENDING_PULLBACK"
+```
+
+**Architecture:**
+- **Data Source:** `ohlcv_universal` table (read-only, no live API calls)
+- **Scan Schedule:** Every hour at :30 (after market data prefetch at :20)
+- **Quality Filtering:** Weighted score ≥ 0.50 to save, ≥ 0.60 to alert
+- **No Throttling:** All qualifying opportunities trigger alerts
+- **Context-Aware:** TRENDING_EXTENSION setups excluded (overextended markets)
+
+**4-Layer Framework:**
+1. **Layer 1: Context Classification** - ADX, ATR, EMA distance determine market state
+2. **Layer 2: Context-Gated Setup Detection** - Only valid setups for the context run
+3. **Layer 3: Pullback Quality Scoring** - 5-factor weighted score (distance, RSI, volume, confluence, structure)
+4. **Layer 4: Weighted Alignment** - Confidence-weighted scoring + position sizing
+
+See [`docs/features/mtf-opportunities-workplan.md`](docs/features/mtf-opportunities-workplan.md) for architecture and design notes.
 
 ---
 
