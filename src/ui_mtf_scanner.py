@@ -430,18 +430,28 @@ def _display_scan_results(
             # Trade setup details
             col1, col2, col3 = st.columns(3)
 
+            # Forex-aware price formatting
+            pair_str = opp.get('pair', '')
+            def fmt_price(price):
+                if not price:
+                    return "N/A"
+                is_forex = any(kw in pair_str.upper() for kw in ["EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"])
+                return f"${price:,.5f}" if is_forex else f"${price:,.2f}"
+
             with col1:
                 st.markdown(f"**Setup:** {opp.get('mtf_setup', 'N/A')}")
-                st.markdown(f"**Entry:** {opp['entry_price']:,.2f}" if opp.get("entry_price") else "**Entry:** Waiting")
+                entry_fmt = fmt_price(opp.get('entry_price'))
+                st.markdown(f"**Entry:** {entry_fmt}" if opp.get("entry_price") else "**Entry:** Waiting")
 
             with col2:
                 st.markdown(f"**LTF Signal:** {opp.get('ltf_entry', 'N/A')}")
-                st.markdown(f"**Stop:** {opp['stop_loss']:,.2f}" if opp.get("stop_loss") else "**Stop:** N/A")
+                stop_fmt = fmt_price(opp.get('stop_loss'))
+                st.markdown(f"**Stop:** {stop_fmt}" if opp.get("stop_loss") else "**Stop:** N/A")
 
             with col3:
                 st.metric("R:R Ratio", f"{opp['rr_ratio']:.1f}:1")
                 if opp.get("target_price"):
-                    st.markdown(f"**Target:** ${opp['target_price']:,.2f}")
+                    st.markdown(f"**Target:** {fmt_price(opp.get('target_price'))}")
 
             if opp.get("patterns"):
                 st.markdown("**Patterns Detected:**")
@@ -545,21 +555,29 @@ def _display_pair_analysis(opportunity: Dict[str, Any]):
 
     col1, col2, col3 = st.columns(3)
 
+    # Forex-aware price formatting
+    pair_str = opportunity.get("pair", "")
+    def fmt_price(price):
+        if not price:
+            return "N/A"
+        is_forex = any(kw in pair_str.upper() for kw in ["EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"])
+        return f"${price:,.5f}" if is_forex else f"${price:,.2f}"
+
     with col1:
         if opportunity.get("entry_price"):
-            st.metric("Entry Price", f"${opportunity['entry_price']:,.2f}")
+            st.metric("Entry Price", fmt_price(opportunity['entry_price']))
 
     with col2:
         if opportunity.get("stop_loss"):
-            st.metric("Stop Loss", f"${opportunity['stop_loss']:,.2f}")
+            st.metric("Stop Loss", fmt_price(opportunity['stop_loss']))
             risk = opportunity["entry_price"] - opportunity["stop_loss"]
-            st.caption(f"Risk: ${risk:,.2f} per unit")
+            st.caption(f"Risk: {fmt_price(risk)} per unit")
 
     with col3:
         if opportunity.get("target_price"):
-            st.metric("Target", f"${opportunity['target_price']:,.2f}")
+            st.metric("Target", fmt_price(opportunity['target_price']))
             reward = opportunity["target_price"] - opportunity["entry_price"]
-            st.caption(f"Reward: ${reward:,.2f} per unit")
+            st.caption(f"Reward: {fmt_price(reward)} per unit")
 
     if opportunity.get("rr_ratio"):
         st.progress(min(1.0, opportunity["rr_ratio"] / 5.0))

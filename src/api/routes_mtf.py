@@ -195,9 +195,10 @@ def _format_scan_result(pair: str, scan_result) -> Dict[str, Any]:
         "mtf_setup": alignment.mtf_setup.setup_type.value,
         "mtf_confidence": round(alignment.mtf_setup.confidence, 2),
         "ltf_entry": ltf.signal_type.value if ltf else "NONE",
-        "entry_price": round(ltf.entry_price, 4) if ltf and ltf.entry_price else None,
-        "stop_loss": round(ltf.stop_loss, 4) if ltf and ltf.stop_loss else None,
-        "target_price": round(target.target_price, 4) if target else None,
+        # Use 5 decimals for price precision
+        "entry_price": round(ltf.entry_price, 5) if ltf and ltf.entry_price else None,
+        "stop_loss": round(ltf.stop_loss, 5) if ltf and ltf.stop_loss else None,
+        "target_price": round(target.target_price, 5) if target else None,
         "patterns": scan_result.patterns,
         "divergence": (
             scan_result.divergence.latest_type.value
