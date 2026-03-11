@@ -232,7 +232,7 @@ class SchedulerManager:
 
     def _run_mtf_hourly_scan(self) -> None:
         """
-        Run MTF opportunity scan every hour at :30.
+        Run MTF opportunity scan every hour at :20.
 
         This job uses the upgraded 4-layer MTF framework:
         1. Load watchlist pairs with their configured trading styles
@@ -246,7 +246,7 @@ class SchedulerManager:
         5. Save all opportunities to database
         6. Send Telegram alert for high-conviction (weighted >= 0.60)
 
-        Schedule: Every hour at :30 minutes (XX:30 UTC)
+        Schedule: Every hour at :20 minutes (XX:20 UTC)
         """
         try:
             logger.info("MTF hourly scan job STARTED")
@@ -270,12 +270,12 @@ class SchedulerManager:
                 new_opportunities = []
                 total_scanned = 0
 
-                # Scan each pair with each configured trading style
+                # Always scan SWING + INTRADAY for every pair regardless of watchlist setting
+                DEFAULT_SCAN_STYLES = ["SWING", "INTRADAY"]
+
                 for item in watchlist_items:
                     pair = item.pair
-                    trading_styles = item.get_trading_styles()
-                    
-                    for trading_style_str in trading_styles:
+                    for trading_style_str in DEFAULT_SCAN_STYLES:
                         try:
                             trading_style = TradingStyle[trading_style_str.upper()]
                         except KeyError:
@@ -435,14 +435,14 @@ class SchedulerManager:
             max_instances=1,
         )
 
-        # Market data prefetch: every hour at :20
-        # Runs at :20 to keep ohlcv_universal fresh for MTF scanning.
+        # Market data prefetch: every hour at :15
+        # Runs at :15 to keep ohlcv_universal fresh for MTF scanning.
         # Uses smart fetch logic to only fetch stale/missing data.
         # Note: May cause API rate limiting if many symbols need refresh.
         self.scheduler.add_job(
             func=self._run_market_data_prefetch,
             trigger='cron',
-            minute=20,
+            minute=15,
             hour='*',
             id="market_data_prefetch",
             name="Market Data Prefetch",
@@ -450,13 +450,13 @@ class SchedulerManager:
             max_instances=1,
         )
 
-        # MTF hourly scan: every hour at :30
-        # Runs at :30 to scan for MTF opportunities using upgraded 4-layer framework.
+        # MTF hourly scan: every hour at :20
+        # Runs at :20 to scan for MTF opportunities using upgraded 4-layer framework.
         # Saves all opportunities to database and sends Telegram alerts for high-conviction.
         self.scheduler.add_job(
             func=self._run_mtf_hourly_scan,
             trigger='cron',
-            minute=30,
+            minute=20,
             hour='*',
             id="mtf_hourly_scan",
             name="MTF Hourly Opportunity Scan",
@@ -495,11 +495,11 @@ class SchedulerManager:
         )
         logger.info(
             "Scheduled 'market_data_prefetch' job "
-            "(runs every hour at :20 minutes past the hour)"
+            "(runs every hour at :15 minutes past the hour)"
         )
         logger.info(
             "Scheduled 'mtf_hourly_scan' job "
-            "(runs every hour at :30 minutes past the hour)"
+            "(runs every hour at :20 minutes past the hour)"
         )
         logger.info(
             "Scheduled 'mtf_opportunity_cleanup' job "
