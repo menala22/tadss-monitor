@@ -19,13 +19,11 @@ docs/
 CLAUDE.md
 
 # -----------------------------------------------------------------------------
-# ALL SOURCE CODE
+# SOURCE CODE (selective)
 # -----------------------------------------------------------------------------
-src/
-scripts/
+# Keep src/ and scripts/ tracked for AI assistant tools
+# Only ignore generated/runtime artifacts below
 tests/
-*.py
-!test_monitor.py
 
 # -----------------------------------------------------------------------------
 # PERSONAL PRODUCTIVITY FILES (NOT PROJECT DOCUMENTATION)
@@ -209,25 +207,15 @@ test_api_response.py
 compare_*.py
 
 # -----------------------------------------------------------------------------
-# GENERATED REPORTS (Archive important ones, ignore daily outputs)
-# -----------------------------------------------------------------------------
-docs/reports/*.md
-docs/reports/*.html
-!docs/reports/README.md
-docs/reports/charts/*.png
-
-# -----------------------------------------------------------------------------
 # QWEN SKILLS CACHE
 # -----------------------------------------------------------------------------
 .qwen/skills/
 .qwen/AGENTS.md
 
 # -----------------------------------------------------------------------------
-# MIGRATION SCRIPTS (Run once, then archive if needed)
+# GENERATED REPORTS (Archive important ones, ignore daily outputs)
 # -----------------------------------------------------------------------------
-src/migrations/
-
-# -----------------------------------------------------------------------------
-# GENERATED INDICATORS
-# -----------------------------------------------------------------------------
-src/indicators/
+docs/reports/*.md
+docs/reports/*.html
+!docs/reports/README.md
+docs/reports/charts/*.png

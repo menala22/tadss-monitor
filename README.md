@@ -3,7 +3,7 @@
 > **Technical Analysis Decision Support System** — monitors manually-executed trading positions with automated technical analysis and Telegram alerts.
 
 _Status: Stable — production live on Google Cloud_
-_Last updated: 2026-03-09_
+_Last updated: 2026-03-10_
 
 ---
 
@@ -12,6 +12,46 @@ _Last updated: 2026-03-09_
 TA-DSS monitors trading positions you've logged manually. Every hour at :10 it fetches live prices, calculates technical signals (EMA, MACD, RSI, OTT), evaluates position health, and sends Telegram alerts when signals turn against your position or PnL crosses a threshold.
 
 **You log the trade → system monitors it 24/7 → you get alerted when action is needed.**
+
+---
+
+## Latest: Market Data Orchestrator Fixes (v0.5.1)
+
+**Resolved:** Three critical data architecture issues affecting market data quality.
+
+### Issues Fixed
+
+1. **BUG-032: Hourly Candle Corruption** — Hourly data showed only midnight timestamps (00:00:00) due to timeframe mapping fallback (`1h` → `1day`). Fixed by adding API format passthrough mappings.
+
+2. **Dual-Cache Writes** — Data was being written to two tables (`ohlcv_cache` and `ohlcv_universal`) with different formats, causing redundant API calls and rate limit issues. Fixed by removing all cache writes from DataFetcher.
+
+3. **Twelve Data 4h Limitation** — Free tier doesn't support 4h interval. Fixed by implementing 1h → 4h aggregation (4× 1h candles → 1× 4h candle).
+
+### Impact
+
+- **Hourly data coverage**: 1/24 hours → 24/24 hours ✅
+- **h4 data availability**: 0 candles (failing) → 201 candles for XAU/USD ✅
+- **Cache tables written**: 2 tables → 1 table (`ohlcv_universal` only) ✅
+- **All verification tests passing** ✅
+
+See [`docs/analysis-market-data-orchestrator-fix.md`](docs/analysis-market-data-orchestrator-fix.md) for complete details.
+
+---
+
+## New: Twelve Data Rate Limit Fix
+
+**Resolved:** API rate limiting issues causing stale data for XAU/USD, USD/CAD, WTI pairs.
+
+The system was exceeding Twelve Data's free tier limits (8 calls/minute, 800/day) due to burst requests at :20 each hour. Four solutions implemented:
+
+1. **Per-Call Rate Limiting** - 8-second delay between Twelve Data API calls
+2. **Spread Prefetch** - Fetches spread across 30-60s with 12s spacing for Twelve Data
+3. **Reduced Frequency** - 50% reduction in fetch frequency (h1: 4h→2h, h4: 12h→6h, d1: 48h→24h)
+4. **Forex to CCXT** - USD/CAD, EUR/USD moved to Kraken (free, no rate limits)
+
+**Impact:** 54% reduction in API usage (~358 → ~166 calls/day), 79% reduction in burst rate.
+
+See [`docs/reports/twelve-data-rate-limit-fix-summary.md`](docs/reports/twelve-data-rate-limit-fix-summary.md) for complete implementation details.
 
 ---
 
@@ -395,8 +435,52 @@ Production runs on Google Cloud e2-micro VM (us-central1, Always Free tier — $
 
 - API + scheduler: 24/7 inside Docker container `tadss`
 - Dashboard: local, connects via `API_BASE_URL`
-- Deploy code changes: `docker cp src/<file>.py tadss:/app/src/<file>.py && docker restart tadss`
-  (Full `docker build` fails on VM — Dockerfile has `--platform linux/arm64` hardcoded)
+- VM: `tadss-vm` (34.171.241.166) in us-central1-a
+
+### Quick Deploy
+
+**Single file:**
+```bash
+docker cp src/<file>.py tadss:/app/src/<file>.py && docker restart tadss
+```
+
+**Multiple files (recommended):**
+```bash
+./scripts/deploy-mtf-opportunities-fix.sh
+```
+
+**Full feature deployment:**
+```bash
+# Use comprehensive deployment script
+./scripts/deploy-mtf-opportunities-fix.sh
+
+# Or manual gcloud deployment
+./scripts/deploy-with-gcloud.sh
+```
+
+### Important Deployment Notes
+
+1. **Clear Python cache after deploying Python files:**
+   ```bash
+   docker exec tadss find /app -type d -name __pycache__ -exec rm -rf {} +
+   docker stop tadss && docker start tadss
+   ```
+
+2. **Run migrations after model changes:**
+   ```bash
+   docker exec tadss python -m src.migrations.migrate_[name] run
+   ```
+
+3. **Verify imports after deployment:**
+   ```bash
+   docker exec tadss python -c "from src.module import X; print('OK')"
+   ```
+
+### Deployment Documentation
+
+- **Complete Guide:** [`docs/deployment/google-cloud.md`](docs/deployment/google-cloud.md)
+- **MTF Deployment Fix:** [`docs/MTF-OPPORTUNITIES-DEPLOYMENT-FIX.md`](docs/MTF-OPPORTUNITIES-DEPLOYMENT-FIX.md)
+- **Deployment Scripts:** [`scripts/deploy-mtf-opportunities-fix.sh`](scripts/deploy-mtf-opportunities-fix.sh)
 
 See [`docs/deployment/google-cloud.md`](docs/deployment/google-cloud.md) for full setup.
 See [`docs/deployment/github-actions.md`](docs/deployment/github-actions.md) for CI-based deploy.
