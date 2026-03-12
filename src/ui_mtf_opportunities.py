@@ -414,6 +414,7 @@ def _display_opportunities_table(opportunities: List[Dict[str, Any]]):
         "weighted_score",
         "position_size_pct",
         "entry_price",
+        "entry_timestamp",
         "rr_ratio",
         "status",
     ]
@@ -427,11 +428,16 @@ def _display_opportunities_table(opportunities: List[Dict[str, Any]]):
         "weighted_score": "Weighted",
         "position_size_pct": "Position %",
         "entry_price": "Entry",
+        "entry_timestamp": "Entry Time",
         "rr_ratio": "R:R",
     }
 
     display_df = df[[c for c in display_cols if c in df.columns]].copy()
     display_df = display_df.rename(columns=rename_map)
+
+    # Sort by entry_timestamp descending (newest first)
+    if "Entry Time" in display_df.columns:
+        display_df = display_df.sort_values("Entry Time", ascending=False, na_position="last")
 
     # Format numbers
     if "Weighted" in display_df.columns:
@@ -464,6 +470,20 @@ def _display_opportunities_table(opportunities: List[Dict[str, Any]]):
     if "R:R" in display_df.columns:
         display_df["R:R"] = display_df["R:R"].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-")
 
+    # Format Entry Time as readable datetime
+    if "Entry Time" in display_df.columns:
+        def format_timestamp(ts):
+            if pd.isna(ts) or ts is None:
+                return "-"
+            try:
+                from datetime import datetime
+                if isinstance(ts, str):
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                return ts.strftime("%m-%d %H:%M")
+            except Exception:
+                return "-"
+        display_df["Entry Time"] = display_df["Entry Time"].apply(format_timestamp)
+
     # Display as interactive table
     st.dataframe(
         display_df,
@@ -480,6 +500,7 @@ def _display_opportunities_table(opportunities: List[Dict[str, Any]]):
             "Weighted": st.column_config.TextColumn("Weighted"),
             "Position %": st.column_config.TextColumn("Position"),
             "Entry": st.column_config.TextColumn("Entry"),
+            "Entry Time": st.column_config.TextColumn("Entry Time"),
             "R:R": st.column_config.TextColumn("R:R"),
             "status": st.column_config.TextColumn("Status"),
         },
