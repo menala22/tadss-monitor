@@ -58,18 +58,18 @@ class MTFContextClassifier:
         adx_range_threshold: float = 20.0,
         ema_fast_span: int = 21,
         ema_slow_span: int = 50,
-        extension_threshold_atr: float = 3.0,
+        extension_threshold_atr: float = 2.5,  # Lowered from 3.0 based on research (Connors & Alvarez, Kaufman)
         pullback_threshold_atr: float = 1.5,
     ):
         """
         Initialize MTF context classifier.
-        
+
         Args:
             adx_trend_threshold: ADX level for trending market.
             adx_range_threshold: ADX level for ranging market.
             ema_fast_span: Fast EMA period.
             ema_slow_span: Slow EMA period.
-            extension_threshold_atr: ATR multiple for overextended detection.
+            extension_threshold_atr: ATR multiple for overextended detection (default 2.5, lowered from 3.0 based on research).
             pullback_threshold_atr: ATR multiple for pullback detection.
         """
         self.adx_trend_threshold = adx_trend_threshold
