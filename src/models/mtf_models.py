@@ -568,11 +568,11 @@ class LTFEntry:
             "direction": self.direction.value,
             "ema20_reclaim": self.ema20_reclaim,
             "rsi_turning": self.rsi_turning.value,
-            "entry_price": round(self.entry_price, 4) if self.entry_price else None,
-            "stop_loss": round(self.stop_loss, 4) if self.stop_loss else None,
-            "confirmation_candle_close": round(self.confirmation_candle_close, 4) if self.confirmation_candle_close else None,
+            "entry_price": self.entry_price if self.entry_price else None,
+            "stop_loss": self.stop_loss if self.stop_loss else None,
+            "confirmation_candle_close": self.confirmation_candle_close if self.confirmation_candle_close else None,
             "confirmation_candle_timestamp": self.confirmation_candle_timestamp.isoformat() if self.confirmation_candle_timestamp else None,
-            "confidence": round(self.confidence, 2),
+            "confidence": self.confidence,
             "warning": self.warning,
         }
 
