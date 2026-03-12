@@ -784,7 +784,7 @@ def calculate_all_targets(
             )
             
             results[method.value] = {
-                "target_price": round(target_result.target_price, 2),
+                "target_price": round(target_result.target_price, 5),
                 "rr_ratio": round(target_result.rr_ratio, 2),
                 "confidence": round(target_result.confidence, 2),
                 "description": target_result.description,

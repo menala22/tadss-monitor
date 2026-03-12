@@ -578,11 +578,12 @@ class HTFBiasDetector:
         """
         avg_price = sum(l.price for l in group) / len(group)
         total_touches = sum(l.touch_count for l in group)
-        max_strength = max(l.strength for l in group)
-        
+        _strength_order = {LevelStrength.WEAK: 0, LevelStrength.MEDIUM: 1, LevelStrength.STRONG: 2}
+        max_strength = max(group, key=lambda l: _strength_order.get(l.strength, 0)).strength
+
         # All levels should be same type (support or resistance)
         level_type = group[0].level_type
-        
+
         # Determine merged strength
         if total_touches >= 5 or max_strength == LevelStrength.STRONG:
             strength = LevelStrength.STRONG

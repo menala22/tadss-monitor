@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from sqlalchemy.orm import Session
 
 from src.models.mtf_models import (
     HTFBias,
@@ -42,6 +43,68 @@ from src.services.support_resistance_detector import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Candle limits per role — HTF needs more history for EMA/swing detection.
+ROLE_LIMITS: Dict[str, int] = {"htf": 250, "mtf": 150, "ltf": 100}
+
+
+def load_pair_data_from_universal(
+    pair: str,
+    config: "MTFTimeframeConfig",
+    db: Session,
+) -> Optional[Dict[str, pd.DataFrame]]:
+    """
+    Load HTF/MTF/LTF DataFrames for a pair from ohlcv_universal table (read-only).
+
+    Single authoritative implementation used by both the API scanner and the
+    report script, so both always analyse the same data.
+
+    Args:
+        pair: Trading pair symbol (e.g. 'XAU/USD').
+        config: MTF timeframe configuration.
+        db: SQLAlchemy database session.
+
+    Returns:
+        {"htf": df, "mtf": df, "ltf": df} or None if any timeframe has <10 candles.
+    """
+    from src.models.ohlcv_universal_model import OHLCVUniversal
+
+    roles = [
+        ("htf", config.htf_timeframe),
+        ("mtf", config.mtf_timeframe),
+        ("ltf", config.ltf_timeframe),
+    ]
+    result: Dict[str, pd.DataFrame] = {}
+
+    for role, internal_tf in roles:
+        limit = ROLE_LIMITS[role]
+
+        candles = (
+            db.query(OHLCVUniversal)
+            .filter(
+                OHLCVUniversal.symbol == pair,
+                OHLCVUniversal.timeframe == internal_tf,
+            )
+            .order_by(OHLCVUniversal.timestamp.desc())
+            .limit(limit)
+            .all()
+        )
+
+        if not candles or len(candles) < 10:
+            logger.info(
+                f"No data in ohlcv_universal for {pair} {internal_tf} — "
+                "waiting for prefetch job"
+            )
+            return None
+
+        df = pd.DataFrame([c.to_dict() for c in candles])
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        df.set_index("timestamp", inplace=True)
+        df = df[["open", "high", "low", "close", "volume"]]
+
+        result[role] = df
+
+    return result
 
 
 @dataclass

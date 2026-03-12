@@ -135,6 +135,7 @@ class LTFEntryFinder:
         current_close = df["close"].iloc[-1]
         current_high = df["high"].iloc[-1]
         current_low = df["low"].iloc[-1]
+        current_timestamp = df.index[-1]  # Get timestamp of confirmation candle
 
         # Entry price: close of confirmation candle
         entry_price = current_close
@@ -161,6 +162,7 @@ class LTFEntryFinder:
             entry_price=float(entry_price),
             stop_loss=float(stop_loss),
             confirmation_candle_close=float(current_close),
+            confirmation_candle_timestamp=current_timestamp,  # NEW: Capture timestamp
         )
 
     def _calculate_rsi(self, series: pd.Series, length: int) -> pd.Series:

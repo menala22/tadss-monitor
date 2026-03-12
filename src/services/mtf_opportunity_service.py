@@ -439,6 +439,7 @@ class MTFOpportunityService:
             ltf_entry=alignment.ltf_entry.signal_type.value,
             entry_price=alignment.ltf_entry.entry_price if alignment.ltf_entry.entry_price else None,
             stop_loss=alignment.ltf_entry.stop_loss if alignment.ltf_entry.stop_loss else None,
+            entry_timestamp=alignment.ltf_entry.confirmation_candle_timestamp,  # NEW: Save LTF entry timestamp
             target_price=alignment.target.target_price if alignment.target else None,
             target_method=alignment.target.method.value if alignment.target and alignment.target.method else None,
             rr_ratio=alignment.rr_ratio,
@@ -524,7 +525,7 @@ class MTFOpportunityService:
                 return False
 
         # Hard gate 3: Minimum weighted score
-        if alignment.weighted_score < 0.50:
+        if alignment.weighted_score < 0.30:
             return False
 
         # Hard gate 4: Minimum R:R ratio (lowered to 1.0)

@@ -7,11 +7,15 @@ signals, and alignment scoring.
 
 MTF Framework:
 - HTF (Higher Timeframe): Directional bias using 50/200 SMA + price structure
-- MTF (Middle Timeframe): Setup identification using 20/50 SMA + RSI divergence
+- MidTF (Middle Timeframe): Setup identification using 20/50 SMA + RSI divergence
 - LTF (Lower Timeframe): Entry timing using price action + 20 EMA + RSI
+
+Note: We use "MidTF" instead of "MTF" for the middle timeframe to avoid
+confusion with "MTF" which refers to the overall Multi-Timeframe system.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import List, Literal, Optional
 
@@ -460,10 +464,10 @@ VALID_SETUPS_BY_CONTEXT = {
 @dataclass
 class MTFSetup:
     """
-    Middle Timeframe setup identification.
+    MidTF (Middle Timeframe) setup identification.
 
-    MTF analysis identifies tradeable setups in the direction of HTF bias.
-    
+    The MidTF analysis identifies tradeable setups in the direction of HTF bias.
+
     UPGRADED: Now uses EMA (Exponential Moving Average) instead of SMA for faster response.
 
     Attributes:
@@ -479,7 +483,7 @@ class MTFSetup:
         pullback_details: Optional pullback setup details.
         consolidation_pattern: Optional consolidation pattern type.
         warning: Optional warning message.
-        mtf_context: MTF market context (Layer 1 classification).
+        mtf_context: MidTF market context (Layer 1 classification).
         pullback_quality_score: Multi-factor quality score (Layer 3).
     """
 
@@ -541,6 +545,7 @@ class LTFEntry:
         entry_price: Suggested entry price (on confirmation candle close).
         stop_loss: Suggested stop loss level.
         confirmation_candle_close: Close price of confirmation candle.
+        confirmation_candle_timestamp: Timestamp of confirmation candle.
         confidence: Confidence score 0.0-1.0 for LTF entry.
         warning: Optional warning message.
     """
@@ -552,6 +557,7 @@ class LTFEntry:
     entry_price: float = 0.0
     stop_loss: float = 0.0
     confirmation_candle_close: float = 0.0
+    confirmation_candle_timestamp: Optional[datetime] = None
     confidence: float = 0.5
     warning: Optional[str] = None
 
@@ -564,6 +570,8 @@ class LTFEntry:
             "rsi_turning": self.rsi_turning.value,
             "entry_price": round(self.entry_price, 4) if self.entry_price else None,
             "stop_loss": round(self.stop_loss, 4) if self.stop_loss else None,
+            "confirmation_candle_close": round(self.confirmation_candle_close, 4) if self.confirmation_candle_close else None,
+            "confirmation_candle_timestamp": self.confirmation_candle_timestamp.isoformat() if self.confirmation_candle_timestamp else None,
             "confidence": round(self.confidence, 2),
             "warning": self.warning,
         }
@@ -640,14 +648,14 @@ class MTFAlignment:
     """
     Combined multi-timeframe alignment score.
 
-    This is the primary output of MTF analysis, combining HTF bias,
-    MTF setup, and LTF entry into a single recommendation.
+    This is the primary output of MTF (Multi-Timeframe) analysis, combining HTF bias,
+    MidTF setup, and LTF entry into a single recommendation.
 
     Attributes:
         pair: Trading pair symbol.
         timestamp: Analysis timestamp.
         htf_bias: Higher timeframe bias assessment.
-        mtf_setup: Middle timeframe setup.
+        mtf_setup: MidTF (middle timeframe) setup.
         ltf_entry: Lower timeframe entry signal.
         alignment_score: Count of aligned timeframes (0-3) - legacy binary scoring.
         alignment_pct: Percentage alignment (0-100).
@@ -745,16 +753,16 @@ class MTFTimeframeConfig:
     Class Attributes:
         trading_style: POSITION, SWING, INTRADAY, DAY, or SCALPING.
         htf_timeframe: Higher timeframe (directional bias).
-        mtf_timeframe: Middle timeframe (setup identification).
+        mtf_timeframe: MidTF (middle timeframe for setup identification).
         ltf_timeframe: Lower timeframe (entry timing).
 
     Common Timeframe Combinations:
-        | Trading Style | HTF    | MTF   | LTF      |
-        |--------------|--------|-------|----------|
-        | POSITION     | Monthly| Weekly| Daily    |
-        | SWING        | Weekly | Daily | 4H       |
-        | INTRADAY     | Daily  | 4H    | 1H       |
-        | DAY          | 4H     | 1H    | 15M      |
+        | Trading Style | HTF    | MidTF   | LTF      |
+        |--------------|--------|---------|----------|
+        | POSITION     | Monthly| Weekly  | Daily    |
+        | SWING        | Weekly | Daily   | 4H       |
+        | INTRADAY     | Daily  | 4H      | 1H       |
+        | DAY          | 4H     | 1H      | 15M      |
         | SCALPING     | 1H     | 15M   | 1-5M     |
 
     General rule: Entry timeframe should be 4-6× smaller than setup timeframe.

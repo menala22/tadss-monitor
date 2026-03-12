@@ -162,6 +162,9 @@ class MTFOpportunity(Base):
     target_method = Column(String(20), nullable=True)  # S/R, MEASURED_MOVE, FIBONACCI, ATR, PRIOR_SWING
     rr_ratio = Column(Float, nullable=False, default=0.0)
     
+    # LTF Entry timestamp (timestamp of confirmation candle)
+    entry_timestamp = Column(DateTime, nullable=True)
+
     # Alternative targets (JSON)
     alternative_targets = Column(Text, nullable=True)  # JSON with all target methods
 
@@ -233,9 +236,10 @@ class MTFOpportunity(Base):
             'recommendation': self.recommendation,
             'mtf_setup': self.mtf_setup,
             'ltf_entry': self.ltf_entry,
-            'entry_price': round(self.entry_price, 2) if self.entry_price else None,
-            'stop_loss': round(self.stop_loss, 2) if self.stop_loss else None,
-            'target_price': round(self.target_price, 2) if self.target_price else None,
+            'entry_price': round(self.entry_price, 5) if self.entry_price else None,
+            'stop_loss': round(self.stop_loss, 5) if self.stop_loss else None,
+            'entry_timestamp': self.entry_timestamp.isoformat() if self.entry_timestamp else None,
+            'target_price': round(self.target_price, 5) if self.target_price else None,
             'target_method': self.target_method,
             'alternative_targets': json.loads(self.alternative_targets) if self.alternative_targets else {},
             'rr_ratio': round(self.rr_ratio, 2) if self.rr_ratio else None,
@@ -279,9 +283,10 @@ class MTFOpportunity(Base):
             'pullback_confluence_score': round(self.pullback_confluence_score, 2) if self.pullback_confluence_score else None,
             'pullback_structure_score': round(self.pullback_structure_score, 2) if self.pullback_structure_score else None,
             # Target info
-            'entry_price': round(self.entry_price, 2) if self.entry_price else None,
-            'stop_loss': round(self.stop_loss, 2) if self.stop_loss else None,
-            'target_price': round(self.target_price, 2) if self.target_price else None,
+            'entry_price': round(self.entry_price, 5) if self.entry_price else None,
+            'stop_loss': round(self.stop_loss, 5) if self.stop_loss else None,
+            'entry_timestamp': self.entry_timestamp.isoformat() if self.entry_timestamp else None,
+            'target_price': round(self.target_price, 5) if self.target_price else None,
             'target_method': self.target_method,
             'rr_ratio': round(self.rr_ratio, 2) if self.rr_ratio else None,
             # Alternative targets (JSON)

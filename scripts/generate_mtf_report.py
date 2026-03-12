@@ -75,7 +75,7 @@ def fetch_real_data(pair: str, config: MTFTimeframeConfig) -> dict:
 
     # Auto-select data source based on pair
     pair_upper = pair.upper().replace('/', '').replace('-', '').replace('_', '')
-    
+
     if pair_upper.startswith(('BTC', 'ETH', 'SOL', 'XRP', 'ADA')):
         source = 'ccxt'
         print(f"  Source: CCXT/Kraken (crypto)")
@@ -103,10 +103,10 @@ def fetch_real_data(pair: str, config: MTFTimeframeConfig) -> dict:
     # Fetch data with increased limits for HTF
     print(f"  Fetching HTF ({htf_tf})... need 200+ candles for full analysis")
     htf_df = fetcher.get_ohlcv(pair, htf_tf, limit=500)  # Max for historical
-    
+
     print(f"  Fetching MTF ({mtf_tf})...")
     mtf_df = fetcher.get_ohlcv(pair, mtf_tf, limit=200)
-    
+
     print(f"  Fetching LTF ({ltf_tf})...")
     ltf_df = fetcher.get_ohlcv(pair, ltf_tf, limit=500)
 
@@ -433,12 +433,12 @@ Price Structure: {htf_bias.price_structure.value}
 
 ---
 
-## 2. Middle Timeframe ({config.mtf_timeframe}) — Setup Identification
+## 2. MidTF (Middle Timeframe: {config.mtf_timeframe}) — Setup Identification
 
 ### 2.1 Setup Details
 
-**Setup Type:** {mtf_setup.setup_type.value}  
-**Direction:** {mtf_setup.direction.value}  
+**Setup Type:** {mtf_setup.setup_type.value}
+**Direction:** {mtf_setup.direction.value}
 **Confidence:** {mtf_setup.confidence:.2f}
 
 """

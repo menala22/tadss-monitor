@@ -164,8 +164,8 @@ def send_mtf_opportunity_alert(
     
     # Send via Telegram
     try:
-        from src.services.notifier import send_telegram_message
-        send_telegram_message(message)
+        from src.notifier import send_alert
+        send_alert(message)
         _record_alert_sent()
         logger.info(f"MTF alert sent for {pair} ({recommendation})")
         return True
@@ -228,8 +228,8 @@ def send_divergence_alert(
     
     # Send via Telegram
     try:
-        from src.services.notifier import send_telegram_message
-        send_telegram_message(message)
+        from src.notifier import send_alert
+        send_alert(message)
         _record_alert_sent()
         logger.info(f"Divergence alert sent for {pair} ({divergence_type})")
         return True
@@ -284,8 +284,8 @@ def send_daily_scan_summary(
     
     # Send via Telegram
     try:
-        from src.services.notifier import send_telegram_message
-        send_telegram_message(message)
+        from src.notifier import send_alert
+        send_alert(message)
         logger.info("Daily MTF scan summary sent")
         return True
     except Exception as e:
@@ -429,8 +429,8 @@ def send_new_opportunity_alert(opportunity) -> bool:
     # Format and send message
     try:
         message = _format_new_opportunity_alert_message(opportunity)
-        from src.services.notifier import send_telegram_message
-        send_telegram_message(message)
+        from src.notifier import send_alert
+        send_alert(message)
         logger.info(f"Opportunity alert sent for {opportunity.pair} ({opportunity.recommendation})")
         return True
     except Exception as e:

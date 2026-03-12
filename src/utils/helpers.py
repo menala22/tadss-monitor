@@ -54,7 +54,8 @@ def normalize_ticker(
         return f"{base}-{quote}"
     elif source == "ccxt":
         # CCXT uses USDT as default stablecoin for crypto pairs
-        quote_normalized = _normalize_quote_currency(quote)
+        # But forex/metals keep their fiat currencies
+        quote_normalized = _normalize_quote_currency(quote, base)
         return f"{base}/{quote_normalized}"
     else:
         raise ValueError(f"Unknown source: {source}. Use 'yfinance' or 'ccxt'.")
@@ -137,26 +138,60 @@ def _parse_symbol(symbol: str) -> tuple[str, str]:
     )
 
 
-def _normalize_quote_currency(quote: str) -> str:
+def _normalize_quote_currency(quote: str, base: str = None) -> str:
     """
     Normalize quote currency for CCXT format.
 
-    CCXT typically uses USDT for stablecoin pairs. This function maps
-    various USD-pegged stablecoins to their CCXT equivalents.
+    Crypto pairs use USDT, but forex/metals use fiat currencies.
+    
+    Strategy:
+    - Forex pairs (EUR/USD, GBP/USD, etc.) → Keep fiat currencies (USD, EUR, GBP, JPY, etc.)
+    - Metals (XAU/USD, XAG/USD) → Keep USD
+    - Crypto pairs (BTC/USD, ETH/USD) → Convert to USDT (CCXT standard)
 
     Args:
         quote: The quote currency string.
+        base: The base currency (used to detect crypto vs forex/metals).
 
     Returns:
         Normalized quote currency for CCXT.
     """
-    # Map common variations to CCXT standard
+    # Forex currencies (non-USD) - always keep as-is
+    forex_currencies_non_usd = {'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD'}
+    
+    # Metals - always keep USD
+    metals = {'XAU', 'XAG', 'XPT', 'XPD'}
+    
+    # Crypto base currencies - convert USD quote to USDT
+    crypto_bases = {'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'MATIC', 
+                    'LTC', 'AVAX', 'LINK', 'UNI', 'ATOM', 'XLM', 'BCH', 'ALGO', 'VET'}
+    
+    # If base is a metal, keep quote as-is (usually USD)
+    if base and base in metals:
+        return quote
+    
+    # If base is crypto and quote is USD, convert to USDT
+    if base and base in crypto_bases and quote == 'USD':
+        return 'USDT'
+    
+    # If quote is a non-USD forex currency, keep it as-is
+    # This handles EUR/USD, GBP/USD, USD/JPY, etc.
+    if quote in forex_currencies_non_usd:
+        return quote
+    
+    # USD quote for forex pairs (EUR/USD, GBP/USD, USD/JPY, etc.) - keep as USD
+    # These are 6-character pairs where both base and quote are fiat
+    fiat_currencies = {'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD'}
+    if quote == 'USD' and base and base in fiat_currencies:
+        return 'USD'
+    
+    # Crypto pairs - use USDT as default stablecoin
     quote_mapping = {
-        "USD": "USDT",  # Default to USDT for crypto
+        "USD": "USDT",  # Crypto pairs default to USDT
         "USDT": "USDT",
         "USDC": "USDC",
         "BUSD": "BUSD",
-        "EUR": "EUR",
+        "EUR": "EUR",   # Crypto-EUR pairs (e.g., BTC/EUR)
         "GBP": "GBP",
         "JPY": "JPY",
         "AUD": "AUD",

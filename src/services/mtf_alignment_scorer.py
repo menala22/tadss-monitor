@@ -92,7 +92,7 @@ class MTFAlignmentScorer:
         Args:
             pair: Trading pair symbol.
             htf_bias: Higher timeframe bias assessment.
-            mtf_setup: Middle timeframe setup.
+            mtf_setup: MidTF (middle timeframe) setup.
             ltf_entry: Lower timeframe entry signal (optional).
             trading_style: Trading style configuration.
 

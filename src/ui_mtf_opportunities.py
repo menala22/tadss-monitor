@@ -686,6 +686,16 @@ def _display_opportunity_detail(opportunity: Dict[str, Any]):
     with trade_cols[0]:
         entry = opportunity.get("entry_price")
         st.metric("Entry Price", format_price_detail(entry, pair_str))
+        
+        # Display entry timestamp if available (LTF confirmation candle)
+        entry_timestamp = opportunity.get("entry_timestamp")
+        if entry_timestamp:
+            try:
+                from datetime import datetime, timezone
+                ts = datetime.fromisoformat(entry_timestamp.replace("Z", "+00:00"))
+                st.caption(f"🕐 Signal: {ts.strftime('%Y-%m-%d %H:%M UTC')}")
+            except Exception:
+                pass
 
     with trade_cols[1]:
         stop = opportunity.get("stop_loss")

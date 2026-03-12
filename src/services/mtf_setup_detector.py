@@ -1,12 +1,15 @@
 """
-Middle Timeframe (MTF) Setup Detector for MTF Analysis.
+MidTF (Middle Timeframe) Setup Detector for Multi-Timeframe (MTF) Analysis.
 
-This module identifies tradeable setups on the middle timeframe,
+This module identifies tradeable setups on the middle timeframe (MidTF),
 following the MTF framework from multi_timeframe.md.
+
+Note: We use "MidTF" instead of "MTF" for the middle timeframe to avoid
+confusion with "MTF" which refers to the overall Multi-Timeframe system.
 
 UPGRADED SYSTEM (Layer 2): Context-Gated Setup Detection
 
-Setup detection is now gated by MTF context classification:
+Setup detection is now gated by MidTF context classification:
 - TRENDING_PULLBACK: PULLBACK setups valid
 - TRENDING_EXTENSION: NO setups (wait for pullback)
 - BREAKING_OUT: BREAKOUT setups valid
@@ -55,9 +58,9 @@ logger = logging.getLogger(__name__)
 
 class MTFSetupDetector:
     """
-    Identify tradeable setups on middle timeframe.
+    Identify tradeable setups on MidTF (middle timeframe).
 
-    The MTF setup identifies the specific tradeable pattern within
+    The MidTF setup identifies the specific tradeable pattern within
     the HTF bias direction.
 
     Attributes:
@@ -103,9 +106,9 @@ class MTFSetupDetector:
         Identify setup in direction of HTF bias.
 
         UPGRADED: Layer 2 - Context-Gated Setup Detection
-        
+
         Steps:
-        1. Classify MTF context (Layer 1)
+        1. Classify MidTF context (Layer 1)
         2. Get valid setups for context from VALID_SETUPS_BY_CONTEXT
         3. If no valid setups (e.g., TRENDING_EXTENSION), return WAIT
         4. Only run detectors for valid setup types
